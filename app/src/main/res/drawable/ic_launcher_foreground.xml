@@ -1,0 +1,69 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Левая неоновая скобка матрицы [ -->
+    <path
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 38,32 L 30,32 L 30,76 L 38,76" />
+
+    <!-- Правая неоновая скобка матрицы ] -->
+    <path
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 70,32 L 78,32 L 78,76 L 70,76" />
+
+    <!-- Буква A (Матрица) по центру -->
+    <!-- Левая нога A -->
+    <path
+        android:strokeColor="#F1F5F9"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M 43,68 L 52,40" />
+
+    <!-- Правая нога A -->
+    <path
+        android:strokeColor="#F1F5F9"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M 52,40 L 61,68" />
+
+    <!-- Перекладина буквы A -->
+    <path
+        android:strokeColor="#F1F5F9"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 46,59 L 58,59" />
+
+    <!-- Символ степени: минус '-' -->
+    <path
+        android:strokeColor="#8B5CF6"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 64,39 L 69,39" />
+
+    <!-- Символ степени: единица '1' (получается A⁻¹) -->
+    <path
+        android:strokeColor="#8B5CF6"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 72,43 L 72,36 L 70,38" />
+
+    <!-- Неоновые светящиеся точки внутри матрицы -->
+    <path
+        android:fillColor="#06B6D4"
+        android:pathData="M 36,44 A 2,2 0 1,1 36,43.9 Z" />
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M 36,64 A 2,2 0 1,1 36,63.9 Z" />
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M 72,64 A 2,2 0 1,1 72,63.9 Z" />
+</vector>
