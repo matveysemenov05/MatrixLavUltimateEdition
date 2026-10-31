@@ -53,14 +53,15 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.random.Random
 
-val BgDark = Color(0xFF090D16)
-val CardDark = Color(0xFF131D2E)
-val AccentCyan = Color(0xFF06B6D4)
-val AccentPurple = Color(0xFF8B5CF6)
-val AccentAmber = Color(0xFFF59E0B)
-val AccentEmerald = Color(0xFF10B981)
-val TextWhite = Color(0xFFF1F5F9)
-val TextDim = Color(0xFF64748B)
+// Unified Matrix Lab design tokens — aligned with the web edition.
+val BgDark = Color(0xFF080D18)
+val CardDark = Color(0xFF111A2B)
+val AccentCyan = Color(0xFF54E5E5)
+val AccentPurple = Color(0xFFB69AFF)
+val AccentAmber = Color(0xFFFFD166)
+val AccentEmerald = Color(0xFF70E1A1)
+val TextWhite = Color(0xFFEDF4FF)
+val TextDim = Color(0xFF9BABC5)
 
 data class HistoryItem(
     val id: Long = System.currentTimeMillis(),
@@ -182,14 +183,14 @@ fun MainAppSwitcher() {
     var rectMatrixB by rememberSaveable { mutableStateOf(List(3) { List(2) { "0" } }) }
     var rectScalarK by rememberSaveable { mutableStateOf("1") }
 
-    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(BgDark, Color(0xFF030712))))) {
+    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF14233B), BgDark, Color(0xFF070B14))))) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text(text = "MATRIX LAB", fontSize = 24.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp, color = TextWhite)
-                    Text(text = "Theory of Control • Ultimate", fontSize = 11.sp, color = AccentCyan, fontWeight = FontWeight.SemiBold)
+                    Text(text = "MATRIX LAB", fontSize = 23.sp, fontWeight = FontWeight.Black, letterSpacing = 2.2.sp, color = TextWhite)
+                    Text(text = "THEORY OF CONTROL • MOBILE EDITION", fontSize = 10.sp, color = AccentCyan, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
                 }
                 FilledTonalButton(
                     onClick = { showHistorySheet = true },
@@ -200,7 +201,7 @@ fun MainAppSwitcher() {
                 ) { Text(text = "🕒 ${historyList.size}", color = AccentCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp) }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp)).background(CardDark).padding(5.dp)) {
                 TabButton("Квадратные (A, B, C)", appMode == 0, Modifier.weight(1f)) { appMode = 0 }
@@ -350,22 +351,43 @@ fun SquareMatricesScreen(
     var showLqrDialog by remember { mutableStateOf(false) }
     var frobSize by rememberSaveable { mutableIntStateOf(2) }
     var frobSizeInput by rememberSaveable { mutableStateOf("2") }
-    var frobA by remember { mutableStateOf(listOf(listOf("0", "1"), listOf("-2", "-3"))) }
-    var frobB by remember { mutableStateOf(listOf(listOf("0"), listOf("1"))) }
+    var frobA by remember {
+        mutableStateOf(List(2) { List(2) { "0" } })
+    }
+
+    var frobB by remember {
+        mutableStateOf(List(2) { listOf("0") })
+    }
     var lqrN by rememberSaveable { mutableIntStateOf(2) }
     var lqrM by rememberSaveable { mutableIntStateOf(1) }
     var lqrNInput by rememberSaveable { mutableStateOf("2") }
     var lqrMInput by rememberSaveable { mutableStateOf("1") }
-    var lqrAInput by remember { mutableStateOf(listOf(listOf("0", "1"), listOf("-2", "-3"))) }
-    var lqrBInput by remember { mutableStateOf(listOf(listOf("0"), listOf("1"))) }
-    var lqrQInput by remember { mutableStateOf(listOf(listOf("1", "0"), listOf("0", "1"))) }
-    var lqrRInput by remember { mutableStateOf(listOf(listOf("1"))) }
-    var polesInput by remember { mutableStateOf("-4, -5") } // оставлено для совместимости состояния
-    var poleAssignments by remember { mutableStateOf(listOf("-4", "-5")) }
+
+    var lqrAInput by remember {
+        mutableStateOf(List(2) { List(2) { "0" } })
+    }
+    var lqrBInput by remember {
+        mutableStateOf(List(2) { listOf("0") })
+    }
+    var lqrQInput by remember {
+        mutableStateOf(List(2) { List(2) { "0" } })
+    }
+    var lqrRInput by remember {
+        mutableStateOf(listOf(listOf("0")))
+    }
+
+    var polesInput by remember { mutableStateOf("0, 0") }
+    var poleAssignments by remember { mutableStateOf(List(2) { "0" }) }
+
     var designSize by rememberSaveable { mutableIntStateOf(2) }
     var designSizeInput by rememberSaveable { mutableStateOf("2") }
-    var designA by remember { mutableStateOf(listOf(listOf("0", "1"), listOf("-2", "-3"))) }
-    var designB by remember { mutableStateOf(listOf(listOf("0"), listOf("1"))) }
+
+    var designA by remember {
+        mutableStateOf(List(2) { List(2) { "0" } })
+    }
+    var designB by remember {
+        mutableStateOf(List(2) { listOf("0") })
+    }
 
     val currentData = when (selectedTab) { 0 -> matrixA 1 -> matrixB else -> matrixC }
     val currentAccent = when (selectedTab) { 0 -> AccentCyan 1 -> AccentPurple else -> AccentAmber }
@@ -429,13 +451,38 @@ fun SquareMatricesScreen(
         Spacer(modifier = Modifier.height(4.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AdaptiveBtn("Фробениус (A,B)", Modifier.weight(1f), colorType = 2) {
+                frobSize = 2
+                frobSizeInput = "2"
+
+                frobA = List(2) { List(2) { "0" } }
+                frobB = List(2) { listOf("0") }
+
                 showFrobeniusDialog = true
             }
-            AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) { showPolesDialog = true }
+            AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) {
+                designSize = 2
+                designSizeInput = "2"
+                designA = List(2) { List(2) { "0" } }
+                designB = List(2) { listOf("0") }
+                polesInput = "0, 0"
+                poleAssignments = List(2) { "0" }
+
+                showPolesDialog = true
+            }
         }
         Spacer(modifier = Modifier.height(6.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AdaptiveBtn("LQR-оптимизация", Modifier.weight(1f), colorType = 2) {
+                lqrN = 2
+                lqrM = 1
+                lqrNInput = "2"
+                lqrMInput = "1"
+
+                lqrAInput = List(2) { List(2) { "0" } }
+                lqrBInput = List(2) { listOf("0") }
+                lqrQInput = List(2) { List(2) { "0" } }
+                lqrRInput = listOf(listOf("0"))
+
                 showLqrDialog = true
             }
         }
@@ -597,6 +644,50 @@ fun SquareMatricesScreen(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        // Дополнительные инструменты, присутствующие в веб-версии
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            AdaptiveBtn("Характеристический многочлен", Modifier.weight(1f), colorType = 2) {
+                try {
+                    val coefficients = characteristicPolynomialCoefficients(parse(currentData))
+                    val polynomial = formatCharacteristicPolynomial(coefficients)
+                    resultScalarText = "Характеристический многочлен матрицы $tabName:\n\np(λ) = $polynomial"
+                    lastResultMatrix = null
+                    lastResultGrid = null
+                    isError = false
+                    onAddToHistory(HistoryItem(title = "Характеристический многочлен p(λ)", resultText = resultScalarText, resultMatrix = null))
+                } catch (e: Exception) {
+                    lastResultMatrix = null
+                    lastResultGrid = null
+                    resultScalarText = e.message ?: "Не удалось вычислить характеристический многочлен"
+                    isError = true
+                }
+            }
+            AdaptiveBtn("Устойчивость (непрерывная)", Modifier.weight(1f), colorType = 2) {
+                try {
+                    val eigenvalues = math.eigenvalues(parse(currentData))
+                    if (eigenvalues.isEmpty()) throw IllegalStateException("Не удалось вычислить собственные значения")
+                    val maxReal = eigenvalues.maxOf { it.re }
+                    val verdict = when {
+                        maxReal < -1e-8 -> "АСИМПТОТИЧЕСКИ УСТОЙЧИВА: все Re(λ) < 0"
+                        maxReal > 1e-8 -> "НЕУСТОЙЧИВА: существует Re(λ) > 0"
+                        else -> "ПОГРАНИЧНЫЙ СЛУЧАЙ: есть собственные значения на мнимой оси; требуется анализ жордановой структуры"
+                    }
+                    val details = eigenvalues.mapIndexed { index, value -> "λ${index + 1} = ${value.re} ${if (value.im < 0) "−" else "+"} ${kotlin.math.abs(value.im)}i" }.joinToString("\n")
+                    resultScalarText = "АНАЛИЗ НЕПРЕРЫВНОЙ СИСТЕМЫ\n\n$verdict\n\nСобственные значения:\n$details"
+                    lastResultMatrix = null
+                    lastResultGrid = null
+                    isError = false
+                    onAddToHistory(HistoryItem(title = "Устойчивость непрерывной системы", resultText = resultScalarText, resultMatrix = null))
+                } catch (e: Exception) {
+                    lastResultMatrix = null
+                    lastResultGrid = null
+                    resultScalarText = e.message ?: "Ошибка анализа устойчивости"
+                    isError = true
+                }
+            }
+        }
 
         // ВЫСШИЕ МАТРИЧНЫЕ ФУНКЦИИ
         Text("Высшие матричные функции:", color = TextDim, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start), letterSpacing = 0.5.sp, fontWeight = FontWeight.SemiBold)
@@ -821,42 +912,167 @@ fun SquareMatricesScreen(
             onDismissRequest = { showFrobeniusDialog = false },
             title = { Text("Форма Фробениуса–Люенбергера", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
             text = {
-                Column(modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
-                    Text("Введите матрицы системы прямо в этом окне. A должна быть n×n, B — n×1. Для результата требуется полностью управляемая система.", color = TextDim, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Размер n:", color = TextWhite)
-                        Box(modifier = Modifier.width(84.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0F172A)).border(1.dp, AccentCyan, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 9.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 560.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+
+                    Text(
+                        text = "Введите матрицы системы прямо в этом окне.",
+                        color = TextWhite,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "A должна быть n×n, B — n×1. Для результата требуется полностью управляемая система.",
+                        color = TextDim,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Размер n:",
+                            color = TextWhite,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .width(76.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF0F172A))
+                                .border(
+                                    1.dp,
+                                    AccentCyan,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             BasicTextField(
                                 value = frobSizeInput,
                                 onValueChange = { input ->
                                     if (input.isEmpty() || input.all { it.isDigit() }) {
                                         frobSizeInput = input
+
                                         val n = input.toIntOrNull()
+
                                         if (n != null && n in 2..7 && n != frobSize) {
                                             frobSize = n
-                                            frobA = resizeMatrix(frobA, n, n)
-                                            frobB = resizeMatrix(frobB, n, 1)
+                                            frobA = List(n) { List(n) { "0" } }
+                                            frobB = List(n) { listOf("0") }
                                         }
                                     }
                                 },
-                                textStyle = TextStyle(color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                                cursorBrush = SolidColor(AccentCyan), singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                textStyle = TextStyle(
+                                    color = TextWhite,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                ),
+                                cursorBrush = SolidColor(AccentCyan),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number
+                                )
                             )
                         }
-                        Text("от 2 до 7", color = TextDim, fontSize = 11.sp)
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Text(
+                            "от 2 до 7",
+                            color = TextDim,
+                            fontSize = 11.sp
+                        )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Матрица A (${frobSize}×${frobSize})", color = AccentCyan, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(frobSize, frobSize, frobA, AccentCyan, 42.dp, 12.sp) { r, c, v ->
-                        frobA = frobA.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+
+                    Spacer(modifier = Modifier.height(22.dp))
+
+                    Text(
+                        "МАТРИЦА A (${frobSize}×${frobSize})",
+                        color = AccentCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        letterSpacing = 0.7.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MatrixGridInput(
+                            frobSize,
+                            frobSize,
+                            frobA,
+                            AccentCyan,
+                            46.dp,
+                            13.sp
+                        ) { r, c, v ->
+                            frobA = frobA.mapIndexed { i, row ->
+                                if (i == r) {
+                                    row.mapIndexed { j, old ->
+                                        if (j == c) v else old
+                                    }
+                                } else {
+                                    row
+                                }
+                            }
+                        }
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Матрица B (${frobSize}×1)", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(frobSize, 1, frobB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
-                        frobB = frobB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        "МАТРИЦА B (${frobSize}×1)",
+                        color = AccentPurple,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        letterSpacing = 0.7.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MatrixGridInput(
+                            frobSize,
+                            1,
+                            frobB,
+                            AccentPurple,
+                            46.dp,
+                            13.sp
+                        ) { r, _, v ->
+                            frobB = frobB.mapIndexed { i, row ->
+                                if (i == r) listOf(v) else row
+                            }
+                        }
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             },
             confirmButton = {
@@ -919,8 +1135,8 @@ fun SquareMatricesScreen(
                                             designSize = n
                                             designA = resizeMatrix(designA, n, n)
                                             designB = resizeMatrix(designB, n, 1)
-                                            polesInput = (1..n).joinToString(", ") { "-${it + 3}" }
-                                            poleAssignments = List(n) { "-${it + 4}" }
+                                            polesInput = List(n) { "0" }.joinToString(", ")
+                                            poleAssignments = List(n) { "0" }
                                         }
                                     }
                                 },
@@ -959,8 +1175,12 @@ fun SquareMatricesScreen(
                             Text(eigText, color = AccentCyan, fontSize = 12.sp, modifier = Modifier.weight(1f))
                             Box(modifier = Modifier.width(110.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF0F172A)).border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp)).padding(9.dp)) {
                                 BasicTextField(
-                                    value = poleAssignments.getOrElse(index) { "-${index + 4}" },
-                                    onValueChange = { value -> poleAssignments = List(designSize) { i -> if (i == index) value else poleAssignments.getOrElse(i) { "-${i + 4}" } } },
+                                    value = poleAssignments.getOrElse(index) { "0" },
+                                    onValueChange = { value ->
+                                        poleAssignments = List(designSize) { i ->
+                                            if (i == index) value else poleAssignments.getOrElse(i) { "0" }
+                                        }
+                                    },
                                     textStyle = TextStyle(color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                                     cursorBrush = SolidColor(AccentCyan), modifier = Modifier.fillMaxWidth(), singleLine = true
                                 )
@@ -1457,6 +1677,43 @@ fun AdaptiveBtn(text: String, modifier: Modifier = Modifier, colorType: Int = 0,
     Button(onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }, modifier = modifier.height(44.dp), colors = ButtonDefaults.buttonColors(containerColor = bgColor), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp), border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)) {
         Text(text, color = txtColor, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
+}
+
+/** Faddeev–LeVerrier: p(λ)=λ^n+c1*λ^(n-1)+...+cn. */
+fun characteristicPolynomialCoefficients(matrix: Array<DoubleArray>): List<Double> {
+    val n = matrix.size
+    require(n > 0 && matrix.all { it.size == n }) { "Для характеристического многочлена нужна квадратная матрица" }
+    var b = Array(n) { r -> DoubleArray(n) { c -> if (r == c) 1.0 else 0.0 } }
+    val coefficients = mutableListOf<Double>()
+    for (k in 1..n) {
+        val ab = Array(n) { r -> DoubleArray(n) { c ->
+            var sum = 0.0
+            for (j in 0 until n) sum += matrix[r][j] * b[j][c]
+            sum
+        } }
+        val trace = (0 until n).sumOf { ab[it][it] }
+        val coefficient = -trace / k.toDouble()
+        coefficients += coefficient
+        b = Array(n) { r -> DoubleArray(n) { c -> ab[r][c] + if (r == c) coefficient else 0.0 } }
+    }
+    return coefficients
+}
+
+fun formatCharacteristicPolynomial(coefficients: List<Double>): String {
+    val n = coefficients.size
+    val terms = mutableListOf<String>()
+    terms += "λ^$n"
+    coefficients.forEachIndexed { index, raw ->
+        val power = n - index - 1
+        val value = if (kotlin.math.abs(raw) < 1e-10) 0.0 else raw
+        if (value != 0.0) {
+            val magnitude = formatNumber(kotlin.math.abs(value))
+            val variable = when (power) { 0 -> ""; 1 -> "λ"; else -> "λ^$power" }
+            val sign = if (terms.isEmpty()) { if (value < 0) "−" else "" } else if (value < 0) " − " else " + "
+            terms += sign + (if (variable.isEmpty() || kotlin.math.abs(value - 1.0) > 1e-10) magnitude else "") + variable
+        }
+    }
+    return terms.joinToString("")
 }
 
 fun parsePastedText(text: String, reqRows: Int, reqCols: Int): List<List<String>>? {
