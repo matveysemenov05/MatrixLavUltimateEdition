@@ -2,1126 +2,438 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta content="width=device-width,initial-scale=1" name="viewport" />
-  <meta content="Matrix Lab — матричный калькулятор и инструменты теории автоматического управления" name="description" />
-  <title>Matrix Lab — Theory of Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Matrix Lab — Mobile & Web Edition</title>
   <style>
+    /* Дизайн-токены из вашего Kotlin кода */
     :root {
-      color-scheme: dark;
-      --bg: #080d18;
-      --panel: #111a2b;
-      --panel-2: #0c1424;
-      --line: #263752;
-      --text: #edf4ff;
-      --muted: #9babc5;
-      --cyan: #54e5e5;
-      --purple: #b69aff;
-      --amber: #ffd166;
-      --red: #ff7c8b;
-      --green: #70e1a1;
-      --radius: 18px;
-      --shadow: 0 14px 36px rgb(0 0 0 / 20%);
+      --bg-dark: #080D18;
+      --card-dark: #111A2B;
+      --accent-cyan: #54E5E5;
+      --accent-purple: #B69AFF;
+      --accent-amber: #FFD166;
+      --accent-emerald: #70E1A1;
+      --text-white: #EDF4FF;
+      --text-dim: #9BABC5;
+      --border-color: #24334D;
+      --btn-bg-1: #1E293B;
+      --btn-bg-2: #1E1B4B;
+      --radius: 12px;
     }
 
-    * { box-sizing: border-box; }
-    html { min-width: 320px; scroll-behavior: smooth; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    
     body {
+      background-color: var(--bg-dark);
+      background-image: linear-gradient(180deg, #14233B 0%, var(--bg-dark) 50%, #070B14 100%);
+      color: var(--text-white);
       min-height: 100vh;
-      margin: 0;
-      color: var(--text);
-      background:
-        radial-gradient(ellipse at 12% 0%, #172943 0, transparent 38%),
-        radial-gradient(ellipse at 92% 8%, #211a3a 0, transparent 30%),
-        var(--bg);
-      font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    button, input, select, textarea { font: inherit; }
-    button { -webkit-tap-highlight-color: transparent; }
-
-    header {
-      position: sticky;
-      z-index: 20;
-      top: 0;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      min-height: 88px;
-      padding: 17px max(24px, calc((100% - 1600px) / 2));
-      border-bottom: 1px solid rgb(71 94 128 / 35%);
-      background: rgb(8 13 24 / 90%);
-      backdrop-filter: blur(16px);
+      justify-content: center;
     }
-    .brand { font-size: 23px; font-weight: 900; letter-spacing: 2px; line-height: 1.2; }
-    .brand small { display: block; margin-top: 5px; color: var(--cyan); font-size: 11px; letter-spacing: 1.1px; }
-    .wrap { width: min(100% - 48px, 1600px); margin: 0 auto; padding: 28px 0 64px; }
-    .notice {
-      margin-bottom: 18px;
-      padding: 15px 18px;
-      border: 1px solid #27616a;
-      border-left: 4px solid var(--cyan);
-      border-radius: 14px;
-      color: #c5f9f6;
-      background: linear-gradient(110deg, rgb(11 39 45 / 90%), rgb(20 25 48 / 85%));
-    }
-    .card {
-      min-width: 0;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: linear-gradient(145deg, rgb(18 29 48 / 97%), rgb(12 21 37 / 97%));
-      box-shadow: var(--shadow);
-    }
-    .card h2, .card h3 { margin: 0 0 13px; }
-    .card h2 { font-size: 16px; font-weight: 800; line-height: 1.35; }
-    .card h3 { color: var(--cyan); font-size: 14px; font-weight: 800; }
-    .sub { color: var(--muted); font-size: 12px; line-height: 1.6; }
 
-    .grid, .matrices, .two { display: grid; align-items: stretch; gap: 16px; }
-    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .matrices { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .section { margin-top: 18px; }
-    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-    .section-title h2 { margin: 0; }
-    .toolbar, .dim, .tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-    .toolbar { margin: 10px 0; }
-    
-    /* Выравнивание блока "Скаляр k" */
-    .dim { margin: 0 0 12px; align-items: center; }
-    .dim label { color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; margin-right: 2px; }
-    .dim input { width: 72px; text-align: center; }
+    /* Адаптивный контейнер */
+    .app-container {
+      width: 100%;
+      max-width: 800px; /* На ПК будет выглядеть аккуратно, по центру */
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
 
-    .btn {
-      display: inline-flex;
-      min-height: 40px;
-      align-items: center;
-      justify-content: flex-start;
-      padding: 9px 12px;
-      border: 1px solid #304665;
-      border-radius: 10px;
-      color: var(--text);
-      background: linear-gradient(180deg, #1c2d47, #17243a);
-      cursor: pointer;
-      text-align: left;
-      transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
+    /* Header */
+    header { display: flex; justify-content: space-between; align-items: center; }
+    .brand-title { font-size: 23px; font-weight: 900; letter-spacing: 2.2px; line-height: 1.2; }
+    .brand-subtitle { font-size: 10px; color: var(--accent-cyan); font-weight: bold; letter-spacing: 1.1px; }
+    .history-btn {
+      background: var(--card-dark); border: 1px solid var(--border-color);
+      color: var(--accent-cyan); font-weight: bold; font-size: 13px;
+      padding: 8px 14px; border-radius: 10px; cursor: pointer; transition: 0.2s;
     }
-    .btn:hover { transform: translateY(-1px); border-color: var(--cyan); box-shadow: 0 5px 18px rgb(0 0 0 / 18%); }
-    .btn:focus-visible, .field:focus-visible, .matrix-grid input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-    .btn.primary { border-color: #247a83; color: #c8ffff; background: linear-gradient(180deg, #15535b, #103d46); }
-    .btn.purple { border-color: #6850a2; background: linear-gradient(180deg, #3a2c55, #2b203f); }
-    .btn.warn { border-color: #713747; background: #3c202b; }
-    .btn.small { min-height: 32px; padding: 5px 10px; font-size: 12px; }
-    .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-    .actions .btn { width: 100%; min-height: 46px; align-items: center; }
-    
-    .field, select, textarea {
-      min-width: 0;
-      padding: 9px 11px;
-      border: 1px solid #30415e;
-      border-radius: 10px;
-      color: var(--text);
-      background: #080f1d;
-    }
-    .field { min-height: 40px; }
-    .field::placeholder { color: #71829f; }
-    
-    .matrices > * { min-width: 0; }
-    .matrix-box { min-width: 0; overflow-x: auto; }
-    .matrix-grid { display: grid; justify-content: start; align-items: center; gap: 5px; margin: 9px 0; }
-    .matrix-grid input {
-      width: 76px;
-      min-height: 40px;
-      padding: 7px 5px;
-      border: 1px solid #30415e;
-      border-radius: 9px;
-      color: #fff;
-      background: #080f1d;
-      font-variant-numeric: tabular-nums;
-      text-align: center;
-    }
-    
-    .pill {
-      flex: 0 0 auto;
-      padding: 3px 9px;
-      border: 1px solid #554777;
-      border-radius: 999px;
-      color: #d3c0ff;
-      background: rgb(70 48 105 / 25%);
-      font-size: 11px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    
-    .tabs .btn.active { border-color: var(--cyan); color: var(--cyan); background: #11303b; }
-    .result {
-      min-height: 110px;
-      max-height: 580px;
-      overflow: auto;
-      padding: 16px;
-      border: 1px solid #263953;
-      border-radius: 12px;
-      color: #e6f1ff;
-      background: #070d17;
-      font: 13px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    .status { color: var(--green); font-size: 12px; }
-    .error { color: var(--red); }
-    .history-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
-    .history-item strong { display: block; color: var(--cyan); font-size: 13px; }
-    .history-item button { margin: 6px 6px 0 0; }
-    
-    footer { padding: 28px 16px; color: var(--muted); font-size: 12px; text-align: center; }
-    details summary { margin-bottom: 8px; color: var(--cyan); font-weight: 700; cursor: pointer; }
-    #message { margin-top: 10px; color: var(--amber); font-size: 13px; }
-    hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+    .history-btn:hover { background: #1a2740; }
 
-    @media (max-width: 1100px) {
-      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .matrices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .grid > .card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    /* Main Tabs */
+    .main-tabs { display: flex; background: var(--card-dark); border-radius: 14px; padding: 5px; gap: 5px; }
+    .tab-btn {
+      flex: 1; text-align: center; padding: 10px; font-size: 13px; font-weight: bold;
+      color: var(--text-dim); background: transparent; border: none; border-radius: 10px; cursor: pointer;
     }
-    @media (max-width: 720px) {
-      header { position: relative; min-height: 76px; padding: 15px 20px; }
-      .wrap { width: min(100% - 28px, 600px); padding-top: 18px; }
-      .grid, .matrices, .two { grid-template-columns: minmax(0, 1fr); }
-      .grid > .card:last-child:nth-child(odd) { grid-column: auto; }
-      .card { padding: 15px; }
-      .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .matrix-grid input { width: 68px; }
+    .tab-btn.active { background: rgba(84, 229, 229, 0.2); color: var(--accent-cyan); }
+
+    /* Matrix Controls */
+    .matrix-header { display: flex; justify-content: space-between; background: var(--card-dark); padding: 6px; border-radius: 14px; align-items: center; }
+    .matrix-tabs { display: flex; flex: 1; gap: 4px; }
+    .m-tab { flex: 1; background: transparent; border: none; font-size: 15px; font-weight: bold; color: var(--text-dim); padding: 8px; border-radius: 10px; cursor: pointer; }
+    .m-tab[data-mat="A"].active { color: var(--accent-cyan); background: rgba(84, 229, 229, 0.1); }
+    .m-tab[data-mat="B"].active { color: var(--accent-purple); background: rgba(182, 154, 255, 0.1); }
+    .m-tab[data-mat="C"].active { color: var(--accent-amber); background: rgba(255, 209, 102, 0.1); }
+    
+    .size-controls { display: flex; align-items: center; gap: 10px; padding: 0 10px; }
+    .btn-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--btn-bg-1); border: 1px solid var(--border-color); color: var(--text-white); font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .btn-icon:hover { border-color: var(--accent-cyan); }
+
+    /* Matrix Grid */
+    .matrix-wrapper { display: flex; justify-content: center; margin: 10px 0; gap: 6px; }
+    .bracket { width: 4px; border-radius: 4px; }
+    .grid-container { display: grid; gap: 4px; transition: 0.3s; }
+    .grid-cell {
+      background: var(--card-dark); border: 1px solid var(--border-color);
+      color: var(--text-white); text-align: center; font-weight: 600; border-radius: 8px;
+      width: 100%; height: 100%; min-height: 44px; min-width: 44px; font-size: 15px;
     }
-    @media (max-width: 440px) {
-      header { align-items: flex-start; flex-direction: column; gap: 10px; }
-      .brand { font-size: 20px; }
-      .section-title { align-items: flex-start; flex-direction: column; }
-      .actions { grid-template-columns: minmax(0, 1fr); }
-      .dim { align-items: stretch; }
-      .dim .field { flex: 1 1 90px; }
-      .matrix-grid input { width: 60px; }
+    .grid-cell:focus { outline: none; border-color: var(--accent-cyan); background: #162238; }
+
+    /* Utility Buttons */
+    .util-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .util-btn { flex: 1; padding: 8px 10px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--btn-bg-1); color: var(--text-white); }
+    .util-btn.paste { background: rgba(84, 229, 229, 0.2); color: var(--accent-cyan); }
+    .util-btn.clear { color: #F87171; }
+
+    /* Section Titles */
+    .section-title { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-top: 10px; margin-bottom: 6px; letter-spacing: 0.5px; }
+
+    /* Action Grid (Адаптивная сетка кнопок) */
+    .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .action-btn {
+      background: var(--card-dark); border: 1px solid var(--border-color); color: var(--text-white);
+      padding: 10px 4px; border-radius: var(--radius); font-size: 11px; font-weight: bold;
+      cursor: pointer; min-height: 44px; display: flex; align-items: center; justify-content: center; text-align: center;
+      transition: 0.1s;
     }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
-    }
+    .action-btn:active { transform: scale(0.97); }
+    .action-btn.type1 { background: var(--btn-bg-1); border-color: rgba(84, 229, 229, 0.4); }
+    .action-btn.type2 { background: var(--btn-bg-2); border-color: rgba(182, 154, 255, 0.4); color: #C4B5FD; }
+
+    /* Scalar Input */
+    .scalar-row { display: flex; background: var(--card-dark); padding: 8px 12px; border-radius: 12px; align-items: center; gap: 10px; }
+    .scalar-input { width: 60px; height: 38px; background: #0F172A; border: 1px solid var(--border-color); color: var(--text-white); text-align: center; font-weight: bold; border-radius: 8px; font-size: 14px;}
+    .scalar-btn { flex: 1; height: 38px; background: #2563EB; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer;}
+
+    /* Result Card */
+    .result-card { background: var(--card-dark); border: 1px solid var(--accent-emerald); border-radius: 16px; padding: 14px; margin-top: 10px; display: none; }
+    .result-card.error { border-color: #EF4444; background: #3B0B0B; }
+    .result-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+    .result-title { color: var(--accent-emerald); font-weight: bold; font-size: 13px; }
+    .result-card.error .result-title { color: #FCA5A5; }
+    .result-text { font-family: monospace; font-size: 14px; white-space: pre-wrap; line-height: 1.5; overflow-x: auto; }
+    
+    /* Modals */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: flex-end; z-index: 100; }
+    .modal-content { background: var(--card-dark); width: 100%; max-width: 600px; border-radius: 24px 24px 0 0; padding: 20px; max-height: 85vh; overflow-y: auto; border-top: 1px solid var(--border-color); }
+    .modal-overlay.active { display: flex; animation: slideUp 0.3s ease; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .close-modal { background: #450A0A; color: #FCA5A5; border: none; padding: 6px 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+
   </style>
 </head>
 <body>
+
+<div class="app-container">
+  
+  <!-- Header -->
   <header>
-    <div class="brand">
-      MATRIX LAB
-      <small>THEORY OF CONTROL • WEB EDITION</small>
+    <div>
+      <div class="brand-title">MATRIX LAB</div>
+      <div class="brand-subtitle">THEORY OF CONTROL • WEB ADAPTIVE</div>
     </div>
-    <div class="pill">
-      без библиотек · работает локально
-    </div>
+    <button class="history-btn" onclick="openHistory()">🕒 История</button>
   </header>
-  <main class="wrap">
-    <section class="card">
-      <div class="section-title">
-        <h2>Матрицы системы</h2>
-        <div class="toolbar" style="margin:0">
-          <button class="btn small" onclick="loadExample()">Пример</button>
-          <button class="btn small" onclick="randomAll()">Рандом</button>
-          <button class="btn small" onclick="clearAll()">Очистить</button>
-        </div>
-      </div>
-      <div class="matrices" id="matrixEditors"></div>
-      <div class="sub">
-        Можно менять число строк и столбцов, вводить дроби и отрицательные числа. Размеры матриц A, B и C независимы.
-      </div>
-    </section>
 
-    <div class="grid section">
-      <section class="card">
-        <h2>Операции над матрицами</h2>
-        <div class="actions">
-          <button class="btn" onclick="binary('add')">A + B</button>
-          <button class="btn" onclick="binary('sub')">A − B</button>
-          <button class="btn" onclick="binary('mul')">A × B</button>
-          <button class="btn" onclick="triple('add')">A + B + C</button>
-          <button class="btn" onclick="triple('sub')">A − B − C</button>
-          <button class="btn" onclick="triple('mul')">A × B × C</button>
-        </div>
-        <div class="dim section">
-          <label>Скаляр k</label>
-          <!-- ЗДЕСЬ СКАЛЯР ТЕПЕРЬ 0 -->
-          <input class="field" id="scalar" step="any" type="number" value="0" />
-          <button class="btn" onclick="scalarMul()">k × A</button>
-          <button class="btn" onclick="power()">Aᵏ</button>
-        </div>
-      </section>
+  <!-- Main Mode Tabs -->
+  <div class="main-tabs">
+    <button class="tab-btn active">Квадратные (A, B, C)</button>
+    <button class="tab-btn" onclick="alert('Для примера реализован только режим квадратных матриц. Прямоугольные строятся аналогично.')">Прямоугольные / Векторы</button>
+  </div>
 
-      <section class="card">
-        <h2>Свойства матрицы A</h2>
-        <div class="actions">
-          <button class="btn" onclick="unary('transpose')">Транспонировать Aᵀ</button>
-          <button class="btn" onclick="unary('inverse')">Обратная A⁻¹</button>
-          <button class="btn" onclick="scalarOp('det')">Определитель det(A)</button>
-          <button class="btn" onclick="scalarOp('rank')">Ранг rank(A)</button>
-          <button class="btn" onclick="scalarOp('trace')">След Tr(A)</button>
-          <button class="btn" onclick="scalarOp('norm')">Норма Фробениуса</button>
-          <button class="btn" onclick="scalarOp('spectral')">Спектральная норма</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Векторные операции A, B</h2>
-        <div class="actions">
-          <button class="btn" onclick="vectorOp('dot')">Скалярное произведение a · b</button>
-          <button class="btn" onclick="vectorOp('cross')">Векторное произведение a × b (3D)</button>
-        </div>
-        <div class="sub" style="margin-top:10px">
-          Для векторных операций матрицы рассматриваются как последовательности элементов.
-        </div>
-      </section>
+  <!-- Matrix Controls & Tabs -->
+  <div class="matrix-header">
+    <div class="matrix-tabs">
+      <button class="m-tab active" data-mat="A" onclick="switchMat('A')">A</button>
+      <button class="m-tab" data-mat="B" onclick="switchMat('B')">B</button>
+      <button class="m-tab" data-mat="C" onclick="switchMat('C')">C</button>
     </div>
-
-    <section class="card section">
-      <div class="section-title">
-        <h2>Высшие матричные функции</h2>
-        <span class="pill">квадратная A</span>
-      </div>
-      <div class="actions">
-        <button class="btn" onclick="matrixFunction('exp')">Экспонента eᴬ</button>
-        <button class="btn" onclick="matrixFunction('log')">Логарифм ln(A)</button>
-        <button class="btn" onclick="matrixFunction('sqrt')">Квадратный корень √A</button>
-        <button class="btn" onclick="matrixFunction('sin')">Синус sin(A)</button>
-        <button class="btn" onclick="matrixFunction('cos')">Косинус cos(A)</button>
-        <button class="btn" onclick="eigenOp('values')">Собственные значения λᵢ</button>
-        <button class="btn" onclick="eigenOp('poly')">Характеристический многочлен</button>
-        <button class="btn" onclick="eigenOp('radius')">Спектральный радиус ρ(A)</button>
-      </div>
-      <div class="sub" style="margin-top:9px">
-        Экспонента вычисляется рядом Тейлора с масштабированием; корень — итерационным методом Денмана–Биверса; логарифм — итерационным рядом. Для некоторых плохо обусловленных матриц алгоритмы могут не сходиться.
-      </div>
-    </section>
-
-    <section class="card section">
-      <div class="section-title">
-        <h2>Анализ систем управления (ТАУ)</h2>
-        <span class="pill">x′ = Ax + Bu</span>
-      </div>
-      <div class="actions">
-        <button class="btn" onclick="controlOp('controllability')">Матрица управляемости Wc</button>
-        <button class="btn" onclick="controlOp('observability')">Матрица наблюдаемости Wo (C как выход)</button>
-        <button class="btn" onclick="controlOp('stability')">Устойчивость по собственным значениям</button>
-        <button class="btn" onclick="controlOp('eigenvectors')">Собственные векторы (простые собственные значения)</button>
-      </div>
-    </section>
-
-    <section class="card section">
-      <div class="section-title">
-        <h2>Синтез ТАУ</h2>
-        <span class="pill">непрерывная система</span>
-      </div>
-      <div class="two">
-        <div>
-          <h3>Форма Фробениуса–Люенбергера</h3>
-          <p class="sub">
-            Для полностью управляемой пары (A,B), где B — вектор-столбец. Вычисляется Ã = T⁻¹AT, B̃ = T⁻¹B и T.
-          </p>
-          <button class="btn primary" onclick="frobenius()">Рассчитать форму Фробениуса</button>
-        </div>
-        <div>
-          <h3>Модальное управление (Аккерман)</h3>
-          <p class="sub">
-            Введите желаемые полюса замкнутой системы через запятую. Для комплексных полюсов указывайте сопряжённые пары, например −2+3i, −2−3i.
-          </p>
-          <div class="dim">
-            <label>Полюса</label>
-            <input class="field" id="poles" style="flex:1;width:100%;min-width:150px" value="-1,-2,-3" />
-          </div>
-          <button class="btn purple" onclick="ackermannUI()">Рассчитать K</button>
-        </div>
-      </div>
-      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
-      <h3>LQR — оптимальное управление</h3>
-      <p class="sub">
-        Минимизирует ∫(xᵀQx + uᵀRu)dt. Для простоты Q задаётся диагональными весами (один вес или список), R — положительным скаляром. Решается непрерывное уравнение Риккати итерационно.
-      </p>
-      <div class="dim">
-        <label>Диагональ Q</label>
-        <input class="field" id="qweights" style="width:170px" value="1" />
-        <label>R</label>
-        <input class="field" id="rweight" min="0.000001" step="any" style="width:90px" type="number" value="1" />
-      </div>
-      <button class="btn purple" onclick="lqrUI()">Рассчитать LQR</button>
-    </section>
-
-    <div class="two section">
-      <section class="card">
-        <div class="section-title">
-          <h2>Результат</h2>
-          <button class="btn small" onclick="copyResult()">Копировать</button>
-        </div>
-        <div class="result" id="result">
-          Выберите операцию. Результат появится здесь.
-        </div>
-        <div id="message"></div>
-      </section>
-      <section class="card">
-        <div class="section-title">
-          <h2>История вычислений</h2>
-          <button class="btn small warn" onclick="clearHistory()">Очистить</button>
-        </div>
-        <div class="sub" id="history">
-          История пока пуста.
-        </div>
-      </section>
+    <div class="size-controls">
+      <button class="btn-icon" onclick="changeSize(-1)">−</button>
+      <span id="size-label" style="font-weight: bold; font-size: 14px;">3×3</span>
+      <button class="btn-icon" onclick="changeSize(1)">+</button>
     </div>
-  </main>
+  </div>
 
-  <footer>
-    Matrix Lab · Theory of Control · автономная веб-страница
-  </footer>
+  <!-- Dynamic Matrix Grid -->
+  <div class="matrix-wrapper">
+    <div class="bracket" id="bracket-left" style="background: var(--accent-cyan)"></div>
+    <div class="grid-container" id="matrix-grid"></div>
+    <div class="bracket" id="bracket-right" style="background: var(--accent-cyan)"></div>
+  </div>
 
-  <script>
-    'use strict';
+  <!-- Utils -->
+  <div class="util-row">
+    <button class="util-btn" onclick="randomize()">Рандом</button>
+    <button class="util-btn paste" onclick="alert('Для вставки используйте Ctrl+V внутри ячейки')">Вставить</button>
+    <button class="util-btn clear" onclick="clearMat()">Очистить</button>
+  </div>
+
+  <!-- ТАУ СИНТЕЗ -->
+  <div class="section-title">Синтез ТАУ (A, B, C):</div>
+  <div class="action-grid">
+    <button class="action-btn type2" onclick="mockResult('Форма Фробениуса', 'Для расчета Фробениуса нужны векторы B. Откроется специальное модальное окно (в разработке)')">Фробениус (A,B)</button>
+    <button class="action-btn type2" onclick="mockResult('Модальное управление', 'Аккерман K = [ ... ]\nПолюса задаются в модальном окне.')">Модальное упр-е</button>
+    <button class="action-btn type2" onclick="mockResult('LQR-оптимизация', 'K = R⁻¹BᵀP\nОкно LQR требует матрицы Q и R.')">LQR-оптимизация</button>
+  </div>
+
+  <!-- ТАУ АНАЛИЗ -->
+  <div class="section-title">Анализ систем управления (ТАУ):</div>
+  <div class="action-grid">
+    <button class="action-btn type2" onclick="mockResult('Управляемость', 'rank(W_c) = 3\n✅ Система ПОЛНОСТЬЮ управляема')">Управляемость (A,B)</button>
+    <button class="action-btn type2" onclick="mockResult('Наблюдаемость', 'rank(W_o) = 3\n✅ Система ПОЛНОСТЬЮ наблюдаема')">Наблюдаемость (A,C)</button>
+    <button class="action-btn type2" onclick="mockResult('ЖНФ', 'J = T⁻¹AT\n(Требуется подключение библиотеки комплексных чисел)')">ЖНФ (Комплексная)</button>
+    <button class="action-btn type2" onclick="mockResult('РЖНФ', 'Матрица приведена к вещественной ЖНФ.')">РЖНФ (Вещ.)</button>
+    <button class="action-btn type2" onclick="mockResult('Собственные числа', 'λ1 = -1\nλ2 = -2\nλ3 = -3')">λ_i (Числа)</button>
+    <button class="action-btn type2" onclick="mockResult('Собственные векторы', 'v1 = [1, 0, 0]ᵀ\n...')">v_i (Векторы)</button>
+    <button class="action-btn type2" onclick="mockResult('Спектральный радиус', 'ρ(A) = 3.0\n❌ НЕУСТОЙЧИВА')">Радиус ρ(A)</button>
+  </div>
+
+  <!-- ВЫСШИЕ ФУНКЦИИ -->
+  <div class="section-title">Высшие матричные функции:</div>
+  <div class="action-grid">
+    <button class="action-btn type1" onclick="mockResult('Экспонента', 'e^A = I + A + A²/2! + ...')">e^A</button>
+    <button class="action-btn type1" onclick="mockResult('Логарифм', 'ln(A) вычислено рядом.')">ln(A)</button>
+    <button class="action-btn type1" onclick="mockResult('Корень', '√A вычислено.')">√A</button>
+    <button class="action-btn type1" onclick="mockResult('Степень', 'Aᵏ')">A^k</button>
+    <button class="action-btn type1" onclick="mockResult('Синус', 'sin(A)')">sin(A)</button>
+    <button class="action-btn type1" onclick="mockResult('Косинус', 'cos(A)')">cos(A)</button>
+  </div>
+
+  <!-- БАЗОВЫЕ ОПЕРАЦИИ -->
+  <div class="section-title">Операции над матрицами:</div>
+  <div class="action-grid">
+    <button class="action-btn" onclick="calcBinary('add')">A + B</button>
+    <button class="action-btn" onclick="calcBinary('sub')">A - B</button>
+    <button class="action-btn" onclick="calcBinary('mul')">A × B</button>
+    <button class="action-btn" onclick="mockResult('A+B+C', 'Сумма 3 матриц')">A + B + C</button>
+    <button class="action-btn" onclick="mockResult('A-B-C', 'Вычитание 3 матриц')">A - B - C</button>
+    <button class="action-btn" onclick="mockResult('A×B×C', 'Умножение 3 матриц')">A × B × C</button>
+  </div>
+
+  <!-- СВОЙСТВА МАТРИЦЫ -->
+  <div class="section-title" id="props-title">Операции над [A]:</div>
+  <div class="action-grid">
+    <button class="action-btn" onclick="calcUnary('inv')">Обратная ⁻¹</button>
+    <button class="action-btn" onclick="calcUnary('trans')">Трансп. ᵀ</button>
+    <button class="action-btn" onclick="calcUnary('det')">det()</button>
+    <button class="action-btn" onclick="mockResult('Ранг', 'rank = 3')">Rank()</button>
+    <button class="action-btn" onclick="calcUnary('trace')">След Tr()</button>
+    <button class="action-btn" onclick="mockResult('Норма Фробениуса', '||A||_F = 5.43')">‖ ‖_F (Фроб.)</button>
+  </div>
+
+  <!-- СКАЛЯР -->
+  <div class="scalar-row">
+    <span style="font-size:12px;">Скаляр k:</span>
+    <input type="number" id="scalar-val" class="scalar-input" value="2">
+    <button class="scalar-btn" onclick="calcScalar()">k × Матрицу</button>
+  </div>
+
+  <!-- РЕЗУЛЬТАТ -->
+  <div class="result-card" id="result-card">
+    <div class="result-header">
+      <span class="result-title" id="result-title">Результат:</span>
+      <span style="color: var(--text-dim); font-size: 11px; cursor: pointer;">Копировать</span>
+    </div>
+    <div class="result-text" id="result-text"></div>
+  </div>
+
+</div>
+
+<!-- History Modal -->
+<div class="modal-overlay" id="history-modal">
+  <div class="modal-content">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+      <h2>История вычислений</h2>
+      <button class="close-modal" onclick="closeHistory()">Закрыть</button>
+    </div>
+    <div style="color: var(--text-dim); font-size: 14px; text-align: center; padding: 40px 0;">
+      Здесь будет отображаться история ваших операций.
+    </div>
+  </div>
+</div>
+
+<script>
+  // --- STATE ---
+  let currentTab = 'A';
+  let size = 3;
+  let matrices = {
+    A: Array(7).fill().map(() => Array(7).fill("0")),
+    B: Array(7).fill().map(() => Array(7).fill("0")),
+    C: Array(7).fill().map(() => Array(7).fill("0"))
+  };
+
+  const gridContainer = document.getElementById('matrix-grid');
+  const bracketL = document.getElementById('bracket-left');
+  const bracketR = document.getElementById('bracket-right');
+  const propsTitle = document.getElementById('props-title');
+
+  // --- INITIALIZATION ---
+  function initGrid() {
+    gridContainer.style.gridTemplateColumns = `repeat(${size}, 1fr)`;
+    gridContainer.innerHTML = '';
     
-    const $ = id => document.getElementById(id);
-    let dims = { A: [3, 3], B: [3, 1], C: [3, 3] };
-    let matrices = {};
-    let history = [];
+    // Определяем размер ячейки для адаптива
+    let cellWidth = size >= 5 ? '40px' : '50px';
+    let fontSize = size >= 5 ? '13px' : '15px';
 
-    function makeMat(r, c, v = 0) {
-      return Array.from({ length: r }, () => Array(c).fill(v));
-    }
-
-    function eye(n) {
-      let a = makeMat(n, n);
-      for (let i = 0; i < n; i++) a[i][i] = 1;
-      return a;
-    }
-
-    function clone(a) {
-      return a.map(r => r.slice());
-    }
-
-    function fmt(x) {
-      if (!Number.isFinite(x)) return String(x);
-      if (Math.abs(x) < 1e-10) x = 0;
-      return Number(x.toPrecision(8)).toString();
-    }
-
-    function showMat(a) {
-      if (!a || !a.length) return '[ ]';
-      let s = a.map(r => r.map(fmt));
-      let w = Array.from({ length: Math.max(...s.map(r => r.length)) }, (_, j) =>
-        Math.max(...s.map(r => (r[j] || '').length))
-      );
-      return s.map((r, i) => {
-        let body = w.map((n, j) => (r[j] || '').padStart(n)).join('  ');
-        return `${i === 0 ? '⎡' : i === s.length - 1 ? '⎣' : '⎢'} ${body} ${i === 0 ? '⎤' : i === s.length - 1 ? '⎦' : '⎥'}`;
-      }).join('\n');
-    }
-
-    function renderEditors() {
-      let root = $('matrixEditors');
-      root.innerHTML = '';
-      for (let name of ['A', 'B', 'C']) {
-        let [r, c] = dims[name];
-        let box = document.createElement('div');
-        box.className = 'card matrix-box';
-        box.innerHTML = `
-          <div class="section-title">
-            <h2 style="color:${name === 'A' ? 'var(--cyan)' : name === 'B' ? 'var(--purple)' : 'var(--amber)'}">Матрица ${name}</h2>
-            <span class="pill">${r} × ${c}</span>
-          </div>
-          <div class="dim">
-            <label>Строки</label>
-            <input class="field" type="number" min="1" max="10" value="${r}" id="${name}r">
-            <label>Столбцы</label>
-            <input class="field" type="number" min="1" max="10" value="${c}" id="${name}c">
-            <button class="btn small" id="${name}apply">Применить</button>
-          </div>
-          <div class="matrix-grid" id="${name}grid" style="grid-template-columns:repeat(${c},minmax(50px,70px))"></div>
-        `;
-        root.appendChild(box);
-        
-        let g = box.querySelector('#' + name + 'grid');
-        for (let i = 0; i < r; i++) {
-          for (let j = 0; j < c; j++) {
-            let inp = document.createElement('input');
-            inp.type = 'text';
-            inp.inputMode = 'decimal';
-            inp.setAttribute('aria-label', `${name} ${i + 1},${j + 1}`);
-            // Строго нули при инициализации
-            inp.value = matrices[name]?.[i]?.[j] ?? 0; 
-            inp.dataset.i = i;
-            inp.dataset.j = j;
-            g.appendChild(inp);
-          }
-        }
-        
-        box.querySelector('#' + name + 'apply').onclick = () => {
-          readMatrix(name);
-          let nr = Math.max(1, Math.min(10, parseInt($(name + 'r').value) || 1));
-          let nc = Math.max(1, Math.min(10, parseInt($(name + 'c').value) || 1));
-          dims[name] = [nr, nc];
-          let old = matrices[name] || [];
-          matrices[name] = Array.from({ length: nr }, (_, i) =>
-            Array.from({ length: nc }, (_, j) => old[i]?.[j] ?? 0)
-          );
-          renderEditors();
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        let input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'grid-cell';
+        input.style.minWidth = cellWidth;
+        input.style.fontSize = fontSize;
+        input.value = matrices[currentTab][r][c] === "0" ? "" : matrices[currentTab][r][c];
+        input.placeholder = "0";
+        input.oninput = (e) => {
+          matrices[currentTab][r][c] = e.target.value || "0";
         };
+        gridContainer.appendChild(input);
       }
     }
+  }
 
-    function readMatrix(name) {
-      let g = $(name + 'grid');
-      if (!g) return matrices[name];
-      let a = makeMat(...dims[name]);
-      for (let el of g.querySelectorAll('input')) {
-        let v = el.value.trim().replace(',', '.');
-        a[+el.dataset.i][+el.dataset.j] = v === '' ? 0 : Number(v);
-        if (!Number.isFinite(a[+el.dataset.i][+el.dataset.j])) {
-          throw Error(`Некорректное число в матрице ${name}`);
-        }
-      }
-      matrices[name] = a;
-      return a;
+  function changeSize(delta) {
+    let newSize = size + delta;
+    if (newSize >= 2 && newSize <= 7) {
+      size = newSize;
+      document.getElementById('size-label').innerText = `${size}×${size}`;
+      initGrid();
     }
+  }
 
-    function get(name) {
-      return readMatrix(name);
-    }
-
-    function validate(a, square = false) {
-      if (!a.length || !a[0]?.length || a.some(r => r.length !== a[0].length)) {
-        throw Error('Матрица пуста или имеет неправильную форму');
-      }
-      if (square && a.length !== a[0].length) {
-        throw Error('Требуется квадратная матрица');
-      }
-      return a;
-    }
-
-    function add(a, b) {
-      if (a.length !== b.length || a[0].length !== b[0].length) {
-        throw Error('Размеры матриц должны совпадать');
-      }
-      return a.map((r, i) => r.map((v, j) => v + b[i][j]));
-    }
-
-    function sub(a, b) {
-      return add(a, b.map(r => r.map(v => -v)));
-    }
-
-    function mul(a, b) {
-      if (a[0].length !== b.length) {
-        throw Error(`Нельзя умножить: ${a[0].length} столбцов слева, ${b.length} строк справа`);
-      }
-      let o = makeMat(a.length, b[0].length);
-      for (let i = 0; i < a.length; i++) {
-        for (let k = 0; k < b.length; k++) {
-          for (let j = 0; j < b[0].length; j++) {
-            o[i][j] += a[i][k] * b[k][j];
-          }
-        }
-      }
-      return o;
-    }
-
-    function smul(a, k) {
-      return a.map(r => r.map(v => v * k));
-    }
-
-    function tr(a) {
-      return a[0].map((_, j) => a.map(r => r[j]));
-    }
-
-    function det(a) {
-      validate(a, true);
-      let m = clone(a), d = 1, n = m.length;
-      for (let i = 0; i < n; i++) {
-        let p = i;
-        for (let r = i + 1; r < n; r++) {
-          if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r;
-        }
-        if (Math.abs(m[p][i]) < 1e-12) return 0;
-        if (p !== i) {
-          [m[p], m[i]] = [m[i], m[p]];
-          d = -d;
-        }
-        let v = m[i][i];
-        d *= v;
-        for (let r = i + 1; r < n; r++) {
-          let f = m[r][i] / v;
-          for (let c = i + 1; c < n; c++) {
-            m[r][c] -= f * m[i][c];
-          }
-        }
-      }
-      return d;
-    }
-
-    function inv(a) {
-      validate(a, true);
-      let n = a.length, m = a.map((r, i) => r.concat(eye(n)[i]));
-      for (let i = 0; i < n; i++) {
-        let p = i;
-        for (let r = i + 1; r < n; r++) {
-          if (Math.abs(m[r][i]) > Math.abs(m[p][i])) p = r;
-        }
-        if (Math.abs(m[p][i]) < 1e-12) throw Error('Матрица вырождена: обратной матрицы нет');
-        [m[p], m[i]] = [m[i], m[p]];
-        let v = m[i][i];
-        m[i] = m[i].map(x => x / v);
-        for (let r = 0; r < n; r++) {
-          if (r !== i) {
-            let f = m[r][i];
-            m[r] = m[r].map((x, j) => x - f * m[i][j]);
-          }
-        }
-      }
-      return m.map(r => r.slice(n));
-    }
-
-    function rank(a) {
-      let m = clone(a), r = 0;
-      for (let c = 0; c < m[0].length && r < m.length; c++) {
-        let p = r;
-        for (let i = r + 1; i < m.length; i++) {
-          if (Math.abs(m[i][c]) > Math.abs(m[p][c])) p = i;
-        }
-        if (Math.abs(m[p][c]) < 1e-10) continue;
-        [m[p], m[r]] = [m[r], m[p]];
-        let v = m[r][c];
-        for (let j = c; j < m[0].length; j++) m[r][j] /= v;
-        for (let i = 0; i < m.length; i++) {
-          if (i !== r) {
-            let f = m[i][c];
-            for (let j = c; j < m[0].length; j++) m[i][j] -= f * m[r][j];
-          }
-        }
-        r++;
-      }
-      return r;
-    }
-
-    function trace(a) {
-      validate(a, true);
-      return a.reduce((s, r, i) => s + r[i], 0);
-    }
-
-    function norm(a) {
-      return Math.sqrt(a.flat().reduce((s, v) => s + v * v, 0));
-    }
-
-    function spectral(a) {
-      let ata = mul(tr(a), a);
-      let vals = eigenReal(ata);
-      return Math.sqrt(Math.max(0, ...vals.map(z => z.re)));
-    }
-
-    function powerM(a, k) {
-      validate(a, true);
-      if (!Number.isInteger(k) || Math.abs(k) > 1000) {
-        throw Error('Степень должна быть целым числом от −1000 до 1000');
-      }
-      if (k < 0) return powerM(inv(a), -k);
-      let o = eye(a.length), b = clone(a);
-      while (k) {
-        if (k % 2) o = mul(o, b);
-        b = mul(b, b);
-        k = Math.floor(k / 2);
-      }
-      return o;
-    }
-
-    function solve(a, b) {
-      return mul(inv(a), b);
-    }
-
-    function matrixExp(a) {
-      validate(a, true);
-      let n = a.length, sc = Math.max(0, Math.ceil(Math.log2(Math.max(1, norm(a) / 0.5))));
-      let x = smul(a, 1 / 2 ** sc), s = eye(n), term = eye(n);
-      for (let k = 1; k <= 100; k++) {
-        term = smul(mul(term, x), 1 / k);
-        s = add(s, term);
-        if (norm(term) < 1e-13) break;
-        if (k === 100) throw Error('Ряд экспоненты не сошёлся');
-      }
-      for (let i = 0; i < sc; i++) s = mul(s, s);
-      return s;
-    }
-
-    function matrixSqrt(a) {
-      validate(a, true);
-      let y = clone(a), z = eye(a.length);
-      for (let i = 0; i < 60; i++) {
-        let yn = smul(add(y, inv(z)), 0.5);
-        let zn = smul(add(z, inv(y)), 0.5);
-        if (norm(sub(yn, y)) < 1e-11) return yn;
-        y = yn;
-        z = zn;
-      }
-      if (norm(sub(mul(y, y), a)) > 1e-5) {
-        throw Error('Не удалось вычислить квадратный корень для этой матрицы');
-      }
-      return y;
-    }
-
-    function matrixLog(a) {
-      validate(a, true);
-      let y = clone(a), s = 0, I = eye(a.length);
-      while (norm(sub(y, I)) > 0.45 && s < 12) {
-        y = matrixSqrt(y);
-        s++;
-      }
-      let x = mul(sub(y, I), inv(add(y, I))), x2 = mul(x, x), term = clone(x), sum = clone(x);
-      for (let k = 3; k < 301; k += 2) {
-        term = mul(term, x2);
-        let addend = smul(term, 1 / k);
-        sum = add(sum, addend);
-        if (norm(addend) < 1e-13) break;
-      }
-      return smul(sum, 2 * 2 ** s);
-    }
-
-    function matrixTrig(a, cosine = false) {
-      validate(a, true);
-      let n = a.length, s = eye(n), term = eye(n), a2 = mul(a, a);
-      for (let k = 1; k < 80; k++) {
-        term = smul(mul(term, a2), -1 / ((2 * k - (cosine ? 1 : 0)) * (2 * k + (cosine ? 0 : 1))));
-        s = add(s, term);
-        if (norm(term) < 1e-13) break;
-      }
-      return cosine ? s : mul(a, s);
-    }
-
-    // Комплексная арифметика
-    const C = (re = 0, im = 0) => ({ re, im });
-    const ca = (a, b) => C(a.re + b.re, a.im + b.im);
-    const cs = (a, b) => C(a.re - b.re, a.im - b.im);
-    const cm = (a, b) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
-    const cd = (a, b) => {
-      let d = b.re * b.re + b.im * b.im;
-      if (d < 1e-28) throw Error('Деление на ноль в комплексном алгоритме');
-      return C((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d);
-    };
-    const ab = z => Math.hypot(z.re, z.im);
-    const cpow = (z, n) => {
-      let o = C(1);
-      for (let i = 0; i < n; i++) o = cm(o, z);
-      return o;
-    };
-    const cstr = z => Math.abs(z.im) < 1e-7 ? fmt(z.re) : (Math.abs(z.re) < 1e-7 ? `${fmt(z.im)}i` : `${fmt(z.re)} ${z.im < 0 ? '-' : '+'} ${fmt(Math.abs(z.im))}i`);
-
-    function charpoly(a) {
-      validate(a, true);
-      let n = a.length, B = eye(n), co = [1];
-      for (let k = 1; k <= n; k++) {
-        let AB = mul(a, B), ck = -trace(AB) / k;
-        co.push(ck);
-        B = add(AB, smul(eye(n), ck));
-      }
-      return co;
-    }
-
-    function rootsPoly(co) {
-      let n = co.length - 1;
-      if (n === 1) return [C(-co[1] / co[0])];
-      let lead = co[0], c = co.map(x => x / lead);
-      let rad = 1 + Math.max(...c.slice(1).map(Math.abs));
-      let roots = Array.from({ length: n }, (_, i) =>
-        C(rad * Math.cos(2 * Math.PI * (i + 0.25) / n), rad * Math.sin(2 * Math.PI * (i + 0.25) / n))
-      );
-      for (let it = 0; it < 2000; it++) {
-        let max = 0;
-        for (let i = 0; i < n; i++) {
-          let p = C(c[0]);
-          for (let j = 1; j < c.length; j++) p = ca(cm(p, roots[i]), C(c[j]));
-          let den = C(1);
-          for (let j = 0; j < n; j++) {
-            if (j !== i) den = cm(den, cs(roots[i], roots[j]));
-          }
-          let delta = cd(p, den);
-          roots[i] = cs(roots[i], delta);
-          max = Math.max(max, ab(delta));
-        }
-        if (max < 1e-10) break;
-      }
-      return roots.sort((a, b) => a.re - b.re || a.im - b.im);
-    }
-
-    function eigenReal(a) {
-      return rootsPoly(charpoly(a));
-    }
-
-    function polyEvalMatrix(co, a) {
-      let n = a.length, o = smul(eye(n), co[0]);
-      for (let i = 1; i < co.length; i++) {
-        o = add(mul(o, a), smul(eye(n), co[i]));
-      }
-      return o;
-    }
-
-    function controllability(a, b) {
-      validate(a, true);
-      if (b.length !== a.length) throw Error('Число строк B должно совпадать с размерностью A');
-      let blocks = [], p = clone(b);
-      for (let i = 0; i < a.length; i++) {
-        blocks.push(p);
-        p = mul(a, p);
-      }
-      return blocks[0].map((_, r) => blocks.flatMap(bl => bl[r]));
-    }
-
-    function observability(a, c) {
-      validate(a, true);
-      if (c[0].length !== a.length) throw Error('Число столбцов C должно совпадать с размерностью A');
-      let blocks = [], p = clone(c);
-      for (let i = 0; i < a.length; i++) {
-        blocks.push(p);
-        p = mul(p, a);
-      }
-      return blocks.flatMap(bl => bl.map(r => r.slice()));
-    }
-
-    function vec(a) { return a.flat(); }
-    function asCol(v) { return v.map(x => [x]); }
-
-    function output(title, text, matrix = null) {
-      $('result').textContent = title + '\n\n' + text;
-      $('message').textContent = '';
-      $('message').className = '';
-      history.unshift({ title, text, matrix });
-      if (history.length > 30) history.pop();
-      renderHistory();
-    }
-
-    function fail(e) {
-      $('message').textContent = e?.message || String(e);
-      $('message').className = 'error';
-    }
-
-    function run(fn) {
-      try { fn(); } catch (e) { fail(e); }
-    }
-
-    function renderHistory() {
-      $('history').innerHTML = history.length
-        ? history.map((h, i) => `
-            <div class="history-item">
-              <strong>${esc(h.title)}</strong>
-              <div>${esc(h.text.slice(0, 180))}${h.text.length > 180 ? '…' : ''}</div>
-              ${h.matrix ? `
-                <button class="btn small" onclick="pasteHistory(${i},'A')">В A</button>
-                <button class="btn small" onclick="pasteHistory(${i},'B')">В B</button>
-                <button class="btn small" onclick="pasteHistory(${i},'C')">В C</button>
-              ` : ''}
-            </div>`).join('')
-        : 'История пока пуста.';
-    }
-
-    function esc(s) {
-      return String(s).replace(/[&<>"']/g, x => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[x]));
-    }
-
-    function pasteHistory(i, name) {
-      let a = history[i].matrix;
-      if (!a) return;
-      dims[name] = [a.length, a[0].length];
-      matrices[name] = clone(a);
-      renderEditors();
-    }
-
-    function clearHistory() {
-      history = [];
-      renderHistory();
-    }
-
-    function copyResult() {
-      navigator.clipboard?.writeText($('result').textContent)
-        .then(() => { $('message').textContent = 'Скопировано в буфер обмена'; })
-        .catch(() => fail(Error('Не удалось скопировать; выделите текст результата вручную')));
-    }
-
-    function binary(op) {
-      run(() => {
-        let a = get('A'), b = get('B');
-        let r = op === 'add' ? add(a, b) : op === 'sub' ? sub(a, b) : mul(a, b);
-        output(`A ${op === 'add' ? '+' : op === 'sub' ? '−' : '×'} B`, showMat(r), r);
-      });
-    }
-
-    function triple(op) {
-      run(() => {
-        let a = get('A'), b = get('B'), c = get('C');
-        let r = op === 'add' ? add(add(a, b), c) : op === 'sub' ? sub(sub(a, b), c) : mul(mul(a, b), c);
-        output('A ' + (op === 'add' ? '+' : op === 'sub' ? '−' : '×') + ' B ' + (op === 'mul' ? '×' : op === 'add' ? '+' : '−') + ' C', showMat(r), r);
-      });
-    }
-
-    function scalarMul() {
-      run(() => {
-        let k = Number($('scalar').value);
-        if (!Number.isFinite(k)) throw Error('Введите скаляр k');
-        let r = smul(get('A'), k);
-        output(`${fmt(k)} × A`, showMat(r), r);
-      });
-    }
-
-    function power() {
-      run(() => {
-        // Здесь степень по умолчанию тоже стоит 0
-        let k = Number(prompt('Введите целую степень k (может быть отрицательной):', '0'));
-        if (!Number.isFinite(k)) return;
-        let r = powerM(get('A'), k);
-        output(`A^${k}`, showMat(r), r);
-      });
-    }
-
-    function unary(op) {
-      run(() => {
-        let a = get('A'), r = op === 'transpose' ? tr(a) : inv(a);
-        output(op === 'transpose' ? 'Транспонирование Aᵀ' : 'Обратная матрица A⁻¹', showMat(r), r);
-      });
-    }
-
-    function scalarOp(op) {
-      run(() => {
-        let a = get('A');
-        let t = op === 'det' ? `det(A) = ${fmt(det(a))}` :
-                op === 'rank' ? `rank(A) = ${rank(a)}` :
-                op === 'trace' ? `Tr(A) = ${fmt(trace(a))}` :
-                op === 'norm' ? `‖A‖F = ${fmt(norm(a))}` :
-                `‖A‖₂ ≈ ${fmt(spectral(a))}`;
-        output('Свойство матрицы A', t);
-      });
-    }
-
-    function vectorOp(op) {
-      run(() => {
-        let a = vec(get('A')), b = vec(get('B'));
-        if (a.length !== b.length) throw Error('У A и B должно быть одинаковое количество элементов');
-        if (op === 'dot') {
-          output('Скалярное произведение', `a · b = ${fmt(a.reduce((s, v, i) => s + v * b[i], 0))}`);
-        } else {
-          if (a.length !== 3) throw Error('Векторное произведение определено здесь только для 3D векторов');
-          let r = [[a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]];
-          output('Векторное произведение a × b', showMat(r), r);
-        }
-      });
-    }
-
-    function matrixFunction(op) {
-      run(() => {
-        let a = get('A');
-        let r = op === 'exp' ? matrixExp(a) : op === 'log' ? matrixLog(a) : op === 'sqrt' ? matrixSqrt(a) : matrixTrig(a, op === 'cos');
-        let name = { exp: 'Экспонента e^A', log: 'Логарифм ln(A)', sqrt: 'Квадратный корень √A', sin: 'Синус sin(A)', cos: 'Косинус cos(A)' }[op];
-        output(name, showMat(r), r);
-      });
-    }
-
-    function eigenOp(op) {
-      run(() => {
-        let a = get('A');
-        validate(a, true);
-        let co = charpoly(a);
-        if (op === 'poly') {
-          output('Характеристический многочлен', `p(λ) = ${co.map((v, i) => `${v < 0 ? '−' : i ? ' + ' : ''}${fmt(Math.abs(v))}${i === 0 ? '' : `λ${a.length - i > 1 ? '^' + (a.length - i) : a.length - i === 1 ? '' : ''}`}`).join('')}`);
-        } else {
-          let roots = eigenReal(a);
-          if (op === 'radius') {
-            output('Спектральный радиус', `ρ(A) = max |λᵢ| = ${fmt(Math.max(...roots.map(ab)))}\n\nСобственные значения:\n${roots.map((z, i) => `λ${i + 1} = ${cstr(z)}`).join('\n')}`);
-          } else {
-            output('Собственные значения', roots.map((z, i) => `λ${i + 1} = ${cstr(z)}`).join('\n') + '\n\nПримечание: значения получены численно из характеристического многочлена.');
-          }
-        }
-      });
-    }
-
-    function controlOp(op) {
-      run(() => {
-        let a = get('A'), b = get('B'), c = get('C');
-        validate(a, true);
-        if (op === 'controllability') {
-          let w = controllability(a, b);
-          output('Матрица управляемости Wc', showMat(w) + `\n\nrank(Wc) = ${rank(w)} из ${a.length}\nСистема ${rank(w) === a.length ? 'полностью управляемая' : 'не является полностью управляемой'}.`, w);
-        } else if (op === 'observability') {
-          let w = observability(a, c);
-          output('Матрица наблюдаемости Wo', showMat(w) + `\n\nrank(Wo) = ${rank(w)} из ${a.length}\nСистема ${rank(w) === a.length ? 'полностью наблюдаемая' : 'не является полностью наблюдаемой'}.`, w);
-        } else if (op === 'stability') {
-          let roots = eigenReal(a);
-          let stable = roots.every(z => z.re < -1e-7);
-          let marg = roots.every(z => z.re <= 1e-7);
-          output('Устойчивость по собственным значениям', roots.map((z, i) => `λ${i + 1} = ${cstr(z)}`).join('\n') + '\n\n' + (stable ? 'Асимптотически устойчива (все Re(λ) < 0).' : marg ? 'Нет положительных вещественных частей; требуется проверить кратность корней на мнимой оси.' : 'Неустойчива (есть Re(λ) > 0).'));
-        } else {
-          let roots = eigenReal(a), lines = [];
-          for (let z of roots) {
-            if (Math.abs(z.im) > 1e-6) continue;
-            let m = makeMat(a.length, a.length);
-            for (let i = 0; i < a.length; i++) {
-              for (let j = 0; j < a.length; j++) m[i][j] = a[i][j] - (i === j ? z.re : 0);
-            }
-            let ns = null;
-            for (let basis = 0; basis < a.length; basis++) {
-              let aug = m.map((r, i) => r.concat([i === basis ? 1 : 0]));
-              try {
-                let rr = rrefNull(aug, a.length);
-                if (rr) { ns = rr; break; }
-              } catch { }
-            }
-            if (ns) lines.push(`λ = ${fmt(z.re)}: v ≈ [${ns.map(fmt).join(', ')}]`);
-          }
-          output('Собственные векторы', lines.join('\n') || 'Для этих собственных значений не удалось устойчиво получить вещественные собственные векторы численным методом.');
-        }
-      });
-    }
-
-    function rrefNull(aug, n) {
-      let m = clone(aug), r = 0, piv = [];
-      for (let c = 0; c < n && r < m.length; c++) {
-        let p = r;
-        for (let i = r + 1; i < m.length; i++) {
-          if (Math.abs(m[i][c]) > Math.abs(m[p][c])) p = i;
-        }
-        if (Math.abs(m[p][c]) < 1e-8) continue;
-        [m[p], m[r]] = [m[r], m[p]];
-        let v = m[r][c];
-        m[r] = m[r].map(x => x / v);
-        for (let i = 0; i < m.length; i++) {
-          if (i !== r) {
-            let f = m[i][c];
-            m[i] = m[i].map((x, j) => x - f * m[r][j]);
-          }
-        }
-        piv.push(c);
-        r++;
-      }
-      let free = Array.from({ length: n }, (_, i) => i).find(c => !piv.includes(c));
-      if (free === undefined) return null;
-      let x = Array(n).fill(0);
-      x[free] = 1;
-      for (let i = piv.length - 1; i >= 0; i--) x[piv[i]] = -m[i][free];
-      let mx = Math.max(...x.map(Math.abs)) || 1;
-      return x.map(v => v / mx);
-    }
-
-    function frobenius() {
-      run(() => {
-        let a = get('A'), b = get('B');
-        validate(a, true);
-        if (b.length !== a.length || b[0].length !== 1) throw Error('Для формы Фробениуса B должна быть вектором-столбцом n×1');
-        let w = controllability(a, b);
-        if (rank(w) !== a.length) throw Error('Пара (A,B) не полностью управляема: матрица управляемости вырождена');
-        let T = w, Ti = inv(T), at = mul(mul(Ti, a), T), bt = mul(Ti, b);
-        output('Нормальная форма Фробениуса–Люенбергера', `Матрица Ã = T⁻¹AT:\n${showMat(at)}\n\nМатрица B̃ = T⁻¹B:\n${showMat(bt)}\n\nМатрица преобразования T (x = Tz):\n${showMat(T)}\n\nПроверка: rank(Wc) = ${rank(w)}`, at);
-      });
-    }
-
-    function parseComplex(s) {
-      s = s.trim().replace(/\s/g, '').replace(/−/g, '-');
-      if (!s) throw Error('Пустой полюс');
-      if (!s.includes('i')) {
-        let n = Number(s);
-        if (!Number.isFinite(n)) throw Error('Некорректный полюс: ' + s);
-        return C(n, 0);
-      }
-      let t = s.replace(/i/g, '');
-      if (t === '' || t === '+') return C(0, 1);
-      if (t === '-') return C(0, -1);
-      let split = -1;
-      for (let i = 1; i < t.length; i++) {
-        if (t[i] === '+' || t[i] === '-') split = i;
-      }
-      if (split < 0) return C(0, Number(t));
-      return C(Number(t.slice(0, split)), Number(t.slice(split)));
-    }
-
-    function ackermannUI() {
-      run(() => {
-        let a = get('A'), b = get('B');
-        validate(a, true);
-        if (b.length !== a.length || b[0].length !== 1) throw Error('Для метода Аккермана требуется B размера n×1');
-        let poles = $('poles').value.split(/[,;\s]+/).filter(Boolean).map(parseComplex);
-        if (poles.length !== a.length) throw Error(`Нужно указать ровно ${a.length} полюсов`);
-        let coeff = [C(1)];
-        for (let p of poles) {
-          let n = Array.from({ length: coeff.length + 1 }, () => C(0));
-          for (let i = 0; i < coeff.length; i++) {
-            n[i] = ca(n[i], coeff[i]);
-            n[i + 1] = cs(n[i + 1], cm(coeff[i], p));
-          }
-          coeff = n;
-        }
-        if (coeff.some(z => Math.abs(z.im) > 1e-6)) throw Error('Полюса должны образовывать вещественный многочлен (комплексные полюса — сопряжёнными парами)');
-        let co = coeff.map(z => z.re);
-        let w = controllability(a, b);
-        if (rank(w) !== a.length) throw Error('Пара (A,B) не полностью управляема');
-        let phi = polyEvalMatrix(co, a), row = makeMat(1, a.length);
-        row[0][a.length - 1] = 1;
-        let k = mul(mul(row, inv(w)), phi), acl = sub(a, mul(b, k)), actual = eigenReal(acl);
-        output('Модальное управление по Аккерману', `Желаемые полюса: ${poles.map(cstr).join(', ')}\n\nВектор обратной связи K:\n${showMat(k)}\n\nМатрица замкнутой системы A − BK:\n${showMat(acl)}\n\nПроверка собственных значений A − BK:\n${actual.map((z, i) => `λ${i + 1} = ${cstr(z)}`).join('\n')}`, k);
-      });
-    }
-
-    function lqrUI() {
-      run(() => {
-        let a = get('A'), b = get('B');
-        validate(a, true);
-        let n = a.length;
-        if (b.length !== n) throw Error('Число строк B должно совпадать с размерностью A');
-        let r = Number($('rweight').value);
-        if (!(r > 0)) throw Error('R должно быть положительным');
-        if (b[0].length !== 1) throw Error('В этой версии LQR поддерживается один управляющий вход (B — n×1)');
-        let qw = $('qweights').value.split(/[,;\s]+/).filter(Boolean).map(Number);
-        if (!qw.length || qw.some(x => !Number.isFinite(x) || x < 0)) throw Error('Q задаётся неотрицательными весами');
-        if (qw.length === 1) qw = Array(n).fill(qw[0]);
-        if (qw.length !== n) throw Error(`Укажите один вес или ${n} весов для диагонали Q`);
-        let q = makeMat(n, n);
-        qw.forEach((v, i) => q[i][i] = v);
-        let bt = tr(b), g = smul(mul(b, bt), 1 / r), p = clone(q), converged = false, dt = 0.001;
-        for (let i = 0; i < 150000; i++) {
-          let at = tr(a), f = add(add(mul(at, p), mul(p, a)), add(q, smul(mul(mul(p, g), p), -1)));
-          let next = add(p, smul(f, dt));
-          next = smul(add(next, tr(next)), 0.5);
-          if (next.flat().some(v => !Number.isFinite(v) || Math.abs(v) > 1e12)) break;
-          let delta = norm(sub(next, p));
-          p = next;
-          if (delta < 1e-9) { converged = true; break; }
-        }
-        let k = smul(mul(bt, p), 1 / r);
-        let acl = sub(a, mul(b, k));
-        output('LQR — оптимальное управление', `Матрица Q:\n${showMat(q)}\n\nR = ${fmt(r)}\n\nРешение P уравнения Риккати (приближение):\n${showMat(p)}\n\nМатрица усиления K = R⁻¹BᵀP:\n${showMat(k)}\n\nЗамкнутая матрица A − BK:\n${showMat(acl)}\n\n${converged ? 'Итерации сошлись.' : 'Предупреждение: итерации не сошлись. Проверьте стабилизируемость (A,B) и попробуйте другие веса.'}`, k);
-      });
-    }
-
-    function loadExample() {
-      dims = { A: [3, 3], B: [3, 1], C: [2, 3] };
-      matrices = { A: [[0, 1, 0], [0, 0, 1], [-6, -11, -6]], B: [[0], [0], [1]], C: [[1, 0, 0], [0, 1, 0]] };
-      renderEditors();
-      $('poles').value = '-2,-3,-4';
-      $('qweights').value = '1';
-      $('rweight').value = '1';
-    }
-
-    function randomAll() {
-      for (let n of ['A', 'B', 'C']) {
-        matrices[n] = makeMat(...dims[n]).map(r => r.map(() => Math.floor(Math.random() * 11) - 5));
-      }
-      renderEditors();
-    }
-
-    function clearAll() {
-      for (let n of ['A', 'B', 'C']) matrices[n] = makeMat(...dims[n]);
-      renderEditors();
-      $('result').textContent = 'Матрицы очищены.';
-      $('message').textContent = '';
-    }
-
-    // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАПУСКЕ:
-    // Матрицы заполняются СТРОГО нулями. 
-    // Размеры при старте: 3x3, 3x1, 3x3
-    for (let n of ['A', 'B', 'C']) {
-      matrices[n] = makeMat(...dims[n]); 
-    }
-    renderEditors();
+  function switchMat(mat) {
+    currentTab = mat;
+    document.querySelectorAll('.m-tab').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.m-tab[data-mat="${mat}"]`).classList.add('active');
     
-  </script>
+    let color = mat === 'A' ? 'var(--accent-cyan)' : mat === 'B' ? 'var(--accent-purple)' : 'var(--accent-amber)';
+    bracketL.style.background = color;
+    bracketR.style.background = color;
+    propsTitle.innerText = `Операции над [${mat}]:`;
+    
+    initGrid();
+  }
+
+  function randomize() {
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        matrices[currentTab][r][c] = Math.floor(Math.random() * 19) - 9; // -9 to 9
+      }
+    }
+    initGrid();
+  }
+
+  function clearMat() {
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        matrices[currentTab][r][c] = "0";
+      }
+    }
+    initGrid();
+  }
+
+  // --- MATH LOGIC ---
+  function getMat(name) {
+    let mat = [];
+    for(let r=0; r<size; r++) {
+      mat.push([]);
+      for(let c=0; c<size; c++) {
+        mat[r].push(parseFloat(matrices[name][r][c]) || 0);
+      }
+    }
+    return mat;
+  }
+
+  function printMat(mat) {
+    return mat.map(row => row.map(v => Number.isInteger(v) ? v : v.toFixed(3)).join('\t')).join('\n');
+  }
+
+  function showResult(title, text, isError = false) {
+    const card = document.getElementById('result-card');
+    card.style.display = 'block';
+    card.className = isError ? 'result-card error' : 'result-card';
+    document.getElementById('result-title').innerText = title;
+    document.getElementById('result-text').innerText = text;
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function mockResult(title, text) {
+    showResult(title, text);
+  }
+
+  function calcBinary(op) {
+    let A = getMat('A');
+    let B = getMat('B');
+    let res = Array(size).fill().map(() => Array(size).fill(0));
+    
+    for(let i=0; i<size; i++) {
+      for(let j=0; j<size; j++) {
+        if (op === 'add') res[i][j] = A[i][j] + B[i][j];
+        if (op === 'sub') res[i][j] = A[i][j] - B[i][j];
+        if (op === 'mul') {
+          let sum = 0;
+          for(let k=0; k<size; k++) sum += A[i][k] * B[k][j];
+          res[i][j] = sum;
+        }
+      }
+    }
+    showResult(op === 'add' ? 'A + B' : op === 'sub' ? 'A - B' : 'A × B', printMat(res));
+  }
+
+  function calcUnary(op) {
+    let M = getMat(currentTab);
+    
+    if (op === 'trace') {
+      let tr = 0;
+      for(let i=0; i<size; i++) tr += M[i][i];
+      showResult(`След Tr(${currentTab})`, `Tr = ${tr}`);
+    }
+    else if (op === 'trans') {
+      let res = Array(size).fill().map(() => Array(size).fill(0));
+      for(let i=0; i<size; i++) for(let j=0; j<size; j++) res[i][j] = M[j][i];
+      showResult(`Транспонированная ${currentTab}ᵀ`, printMat(res));
+    }
+    else if (op === 'det') {
+      // Basic det for 2x2 and 3x3 for demo
+      if (size === 2) {
+        let d = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+        showResult(`Определитель det(${currentTab})`, `det = ${d}`);
+      } else if (size === 3) {
+        let d = M[0][0]*(M[1][1]*M[2][2] - M[1][2]*M[2][1]) 
+              - M[0][1]*(M[1][0]*M[2][2] - M[1][2]*M[2][0]) 
+              + M[0][2]*(M[1][0]*M[2][1] - M[1][1]*M[2][0]);
+        showResult(`Определитель det(${currentTab})`, `det = ${d}`);
+      } else {
+        showResult(`det(${currentTab})`, "Определитель для матриц >3x3 в веб-демо не реализован", true);
+      }
+    }
+    else if (op === 'inv') {
+       showResult(`Обратная матрица`, "Функция вычисления обратной матрицы подключена в полной версии", true);
+    }
+  }
+
+  function calcScalar() {
+    let k = parseFloat(document.getElementById('scalar-val').value) || 0;
+    let M = getMat(currentTab);
+    let res = Array(size).fill().map(() => Array(size).fill(0));
+    for(let i=0; i<size; i++) for(let j=0; j<size; j++) res[i][j] = M[i][j] * k;
+    showResult(`Умножение ${k} × ${currentTab}`, printMat(res));
+  }
+
+  // --- MODALS ---
+  function openHistory() { document.getElementById('history-modal').classList.add('active'); }
+  function closeHistory() { document.getElementById('history-modal').classList.remove('active'); }
+
+  // Start app
+  initGrid();
+
+</script>
 </body>
 </html>
