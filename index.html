@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Matrix Lab — Mobile & Web Edition</title>
+  <title>Matrix Lab — Theory of Control</title>
   <style>
     :root {
       --bg-dark: #080D18;
@@ -30,50 +30,56 @@
 
     .matrix-header { display: flex; justify-content: space-between; background: var(--card-dark); padding: 6px; border-radius: 14px; align-items: center; }
     .matrix-tabs { display: flex; flex: 1; gap: 4px; }
-    .m-tab { flex: 1; background: transparent; border: none; font-size: 15px; font-weight: bold; color: var(--text-dim); padding: 8px; border-radius: 10px; cursor: pointer; }
+    .m-tab { flex: 1; background: transparent; border: none; font-size: 15px; font-weight: bold; color: var(--text-dim); padding: 8px; border-radius: 10px; cursor: pointer; transition: 0.2s;}
     .m-tab.active { color: var(--accent-cyan); background: rgba(84, 229, 229, 0.1); }
     .m-tab[data-mat="B"].active { color: var(--accent-purple); background: rgba(182, 154, 255, 0.1); }
     .m-tab[data-mat="C"].active { color: var(--accent-amber); background: rgba(255, 209, 102, 0.1); }
     .size-controls { display: flex; align-items: center; gap: 10px; padding: 0 10px; }
-    .btn-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--btn-bg-1); border: 1px solid var(--border-color); color: var(--text-white); font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .btn-icon { width: 34px; height: 34px; border-radius: 8px; background: var(--btn-bg-1); border: 1px solid var(--border-color); color: var(--text-white); font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.1s;}
+    .btn-icon:active { transform: scale(0.9); }
 
     .matrix-wrapper { display: flex; justify-content: center; margin: 10px 0; gap: 6px; overflow-x: auto; padding-bottom: 5px;}
-    .bracket { width: 4px; border-radius: 4px; }
+    .bracket { width: 4px; border-radius: 4px; transition: 0.3s; }
     .grid-container { display: grid; gap: 4px; }
-    .grid-cell { background: var(--card-dark); border: 1px solid var(--border-color); color: var(--text-white); text-align: center; font-weight: 600; border-radius: 8px; width: 100%; height: 100%; min-height: 44px; min-width: 44px; font-size: 15px; }
+    .grid-cell { background: var(--card-dark); border: 1px solid var(--border-color); color: var(--text-white); text-align: center; font-weight: 600; border-radius: 8px; width: 100%; height: 100%; min-height: 44px; min-width: 44px; font-size: 15px; transition: 0.1s;}
     .grid-cell:focus { outline: none; border-color: var(--accent-cyan); background: #162238; }
 
     .util-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-    .util-btn { flex: 1; padding: 8px 10px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--btn-bg-1); color: var(--text-white); }
+    .util-btn { flex: 1; padding: 8px 10px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; background: var(--btn-bg-1); color: var(--text-white); transition: 0.1s;}
+    .util-btn:active { transform: scale(0.97); }
     .util-btn.clear { color: #F87171; }
 
-    .section-title { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-top: 10px; margin-bottom: 6px; letter-spacing: 0.5px; }
-    .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px; }
-    .action-btn { background: var(--card-dark); border: 1px solid var(--border-color); color: var(--text-white); padding: 10px 4px; border-radius: var(--radius); font-size: 11px; font-weight: bold; cursor: pointer; min-height: 44px; display: flex; align-items: center; justify-content: center; text-align: center; transition: 0.1s; }
-    .action-btn:active { transform: scale(0.97); }
+    .section-title { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-top: 10px; margin-bottom: 6px; letter-spacing: 0.5px; text-transform: uppercase;}
+    .action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .action-btn { background: var(--card-dark); border: 1px solid var(--border-color); color: var(--text-white); padding: 10px 6px; border-radius: var(--radius); font-size: 11px; font-weight: bold; cursor: pointer; min-height: 44px; display: flex; align-items: center; justify-content: center; text-align: center; transition: 0.1s; }
+    .action-btn:active { transform: scale(0.95); }
+    .action-btn:hover { filter: brightness(1.2); }
     .action-btn.type1 { background: var(--btn-bg-1); border-color: rgba(84, 229, 229, 0.4); }
     .action-btn.type2 { background: var(--btn-bg-2); border-color: rgba(182, 154, 255, 0.4); color: #C4B5FD; }
 
     .scalar-row { display: flex; background: var(--card-dark); padding: 8px 12px; border-radius: 12px; align-items: center; gap: 10px; }
     .scalar-input { width: 60px; height: 38px; background: #0F172A; border: 1px solid var(--border-color); color: var(--text-white); text-align: center; font-weight: bold; border-radius: 8px; font-size: 14px;}
-    .scalar-btn { flex: 1; height: 38px; background: #2563EB; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer;}
+    .scalar-btn { flex: 1; height: 38px; background: #2563EB; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.1s;}
+    .scalar-btn:active { transform: scale(0.97); }
 
     .result-card { background: var(--card-dark); border: 1px solid var(--accent-emerald); border-radius: 16px; padding: 14px; margin-top: 10px; display: none; }
     .result-card.error { border-color: #EF4444; background: #3B0B0B; }
     .result-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
     .result-title { color: var(--accent-emerald); font-weight: bold; font-size: 13px; }
     .result-card.error .result-title { color: #FCA5A5; }
-    .result-text { font-family: monospace; font-size: 13px; white-space: pre-wrap; line-height: 1.5; overflow-x: auto; }
+    .result-text { font-family: monospace; font-size: 14px; white-space: pre-wrap; line-height: 1.6; overflow-x: auto; }
 
     /* Modals */
-    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: flex-end; z-index: 100; backdrop-filter: blur(3px); }
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: flex-end; z-index: 100; backdrop-filter: blur(4px); }
     .modal-content { background: var(--card-dark); width: 100%; max-width: 600px; border-radius: 24px 24px 0 0; padding: 20px; max-height: 90vh; overflow-y: auto; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 12px;}
     .modal-overlay.active { display: flex; animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .modal-title { font-size: 18px; font-weight: bold; color: var(--text-white); }
-    .close-modal { background: transparent; color: var(--text-dim); border: none; font-size: 14px; cursor: pointer; }
-    .modal-btn { background: rgba(182, 154, 255, 0.2); color: var(--accent-purple); border: 1px solid var(--accent-purple); padding: 12px; border-radius: 10px; font-weight: bold; cursor: pointer; text-align: center; margin-top: 10px; }
-    .input-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+    .close-modal { background: #3B0B0B; color: #FCA5A5; border: 1px solid #EF4444; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.1s;}
+    .close-modal:active { transform: scale(0.95); }
+    .modal-btn { background: rgba(182, 154, 255, 0.2); color: var(--accent-purple); border: 1px solid var(--accent-purple); padding: 12px; border-radius: 10px; font-weight: bold; cursor: pointer; text-align: center; margin-top: 10px; transition: 0.1s;}
+    .modal-btn:active { transform: scale(0.97); background: rgba(182, 154, 255, 0.3);}
+    .input-label { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; font-weight: bold;}
     .wide-input { width: 100%; background: #0F172A; border: 1px solid var(--border-color); color: white; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 14px; }
   </style>
 </head>
@@ -186,14 +192,14 @@
 <!-- ФРОБЕНИУС -->
 <div class="modal-overlay" id="modal-frobenius">
   <div class="modal-content">
-    <div style="display: flex; justify-content: space-between;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
       <h2 class="modal-title">Форма Фробениуса</h2>
       <button class="close-modal" onclick="closeModal('modal-frobenius')">Закрыть</button>
     </div>
     <p style="font-size: 12px; color: var(--text-dim);">A: n×n, B: n×1. Система должна быть управляема.</p>
     
     <div style="display: flex; gap: 10px; align-items: center;">
-      <span style="font-size: 13px;">Размер n:</span>
+      <span style="font-size: 13px; color: white;">Размер n:</span>
       <input type="number" id="frob-n" class="scalar-input" value="3" onchange="buildFrobGrids()">
       <button class="util-btn" style="flex:none" onclick="loadFromMain('frob')">Загрузить A, B с экрана</button>
     </div>
@@ -215,14 +221,14 @@
 <!-- АККЕРМАН -->
 <div class="modal-overlay" id="modal-ackermann">
   <div class="modal-content">
-    <div style="display: flex; justify-content: space-between;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
       <h2 class="modal-title">Модальное управление</h2>
       <button class="close-modal" onclick="closeModal('modal-ackermann')">Закрыть</button>
     </div>
     <p style="font-size: 12px; color: var(--text-dim);">Введите желаемые полюса через запятую (напр. -1, -2+i, -2-i).</p>
     
     <div style="display: flex; gap: 10px; align-items: center;">
-      <span style="font-size: 13px;">Размер n:</span>
+      <span style="font-size: 13px; color: white;">Размер n:</span>
       <input type="number" id="ack-n" class="scalar-input" value="3" onchange="buildAckGrids()">
       <button class="util-btn" style="flex:none" onclick="loadFromMain('ack')">Загрузить A, B</button>
     </div>
@@ -241,22 +247,22 @@
     <div class="input-label">Желаемые полюса (n штук):</div>
     <input type="text" id="ack-poles" class="wide-input" value="-1, -2, -3">
     
-    <button class="modal-btn" onclick="calcAckermann()">Рассчитать K (Аккерман)</button>
+    <button class="modal-btn" onclick="calcAckermann()">Рассчитать K (Метод Аккермана)</button>
   </div>
 </div>
 
 <!-- LQR -->
 <div class="modal-overlay" id="modal-lqr">
   <div class="modal-content">
-    <div style="display: flex; justify-content: space-between;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
       <h2 class="modal-title">LQR Синтез</h2>
       <button class="close-modal" onclick="closeModal('modal-lqr')">Закрыть</button>
     </div>
     <p style="font-size: 12px; color: var(--text-dim);">Минимизация ∫(xᵀQx + uᵀRu)dt. Q ≥ 0, R > 0.</p>
     
     <div style="display: flex; gap: 10px; align-items: center;">
-      <span style="font-size: 13px;">n (состояния):</span><input type="number" id="lqr-n" class="scalar-input" value="2" onchange="buildLQRGrids()">
-      <span style="font-size: 13px;">m (входы):</span><input type="number" id="lqr-m" class="scalar-input" value="1" onchange="buildLQRGrids()">
+      <span style="font-size: 13px; color: white;">Состояния (n):</span><input type="number" id="lqr-n" class="scalar-input" value="2" onchange="buildLQRGrids()">
+      <span style="font-size: 13px; color: white;">Входы (m):</span><input type="number" id="lqr-m" class="scalar-input" value="1" onchange="buildLQRGrids()">
     </div>
     <button class="util-btn" onclick="loadFromMain('lqr')">Загрузить A, B с экрана (Q=E, R=E)</button>
 
@@ -274,7 +280,7 @@
 <!-- POWER MODAL -->
 <div class="modal-overlay" id="modal-power">
   <div class="modal-content" style="max-width: 400px; padding-bottom:30px;">
-    <div style="display: flex; justify-content: space-between;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
       <h2 class="modal-title">Степень матрицы</h2>
       <button class="close-modal" onclick="closeModal('modal-power')">Закрыть</button>
     </div>
@@ -284,7 +290,7 @@
   </div>
 </div>
 
-<!-- ================= JAVASCRIPT ================= -->
+<!-- ================= JAVASCRIPT МАГИЯ ================= -->
 <script>
   /* --- MATH LIBRARY (MATHEMATICS ENGINE) --- */
   const MathExt = {
@@ -307,7 +313,7 @@
     },
     
     // Базовые матричные операции
-    zeros: (r, c) => Array(r).fill().map(() => Array(c).fill(0)),
+    zeros: (r, c) => Array.from({length: r}, () => Array(c).fill(0)),
     eye: (n) => { let m = MathExt.zeros(n,n); for(let i=0;i<n;i++) m[i][i]=1; return m; },
     clone: (A) => A.map(row => [...row]),
     add: (A, B) => A.map((r, i) => r.map((v, j) => v + B[i][j])),
@@ -327,7 +333,8 @@
       return res;
     },
     trace: (A) => { let t = 0; for(let i=0; i<A.length; i++) t += A[i][i]; return t; },
-    normF: (A) => Math.sqrt(A.flat().reduce((sum, v) => sum + v*v, 0)),
+    // Заменили flat() на reduce для совместимости со старыми браузерами
+    normF: (A) => Math.sqrt(A.reduce((sum, row) => sum + row.reduce((s, v) => s + v*v, 0), 0)),
 
     // Гаусс-Жордан (Определитель, Ранг, Обратная)
     rref: (matrix) => {
@@ -383,7 +390,7 @@
       }
       return coeffs;
     },
-    roots: (coeffs) => { // Durand-Kerner
+    roots: (coeffs) => { 
       let n = coeffs.length - 1;
       if (n === 1) return [MathExt.C(-coeffs[1]/coeffs[0])];
       let c = coeffs.map(x => x / coeffs[0]);
@@ -410,9 +417,8 @@
     eigenvectors: (A, eigenvals) => {
       let vecs = [];
       for(let e of eigenvals) {
-        if(Math.abs(e.im) > 1e-6) { vecs.push(null); continue; } // Упрощенно для веществ.
+        if(Math.abs(e.im) > 1e-6) { vecs.push(null); continue; } 
         let M = MathExt.sub(A, MathExt.smul(MathExt.eye(A.length), e.re));
-        // Поиск базиса нуль-пространства
         let { M: red } = MathExt.rref(M);
         let vec = Array(A.length).fill(0);
         let freeVar = -1;
@@ -424,7 +430,8 @@
         if(freeVar !== -1) {
           vec[freeVar] = 1;
           for(let r=0; r<A.length; r++) if(Math.abs(red[r][freeVar]) > 1e-6) {
-             let pCol = red[r].findIndex(x => Math.abs(x-1)<1e-6);
+             let pCol = -1;
+             for(let k=0; k<red[r].length; k++) if(Math.abs(red[r][k]-1)<1e-6) { pCol = k; break; }
              if(pCol!==-1) vec[pCol] = -red[r][freeVar];
           }
           let norm = Math.sqrt(vec.reduce((s,v)=>s+v*v,0)) || 1;
@@ -453,7 +460,7 @@
       for(let i=0; i<s; i++) E = MathExt.mul(E, E);
       return E;
     },
-    sqrtm: (A) => { // Denman-Beavers
+    sqrtm: (A) => { 
       let Y = MathExt.clone(A), Z = MathExt.eye(A.length);
       for(let i=0; i<50; i++) {
         let invZ = MathExt.inv(Z), invY = MathExt.inv(Y);
@@ -464,7 +471,7 @@
       }
       return Y;
     },
-    logm: (A) => { // Inverse scaling and squaring
+    logm: (A) => { 
       let Y = MathExt.clone(A), s = 0, I = MathExt.eye(A.length);
       while(MathExt.normF(MathExt.sub(Y, I)) > 0.4 && s < 10) { Y = MathExt.sqrtm(Y); s++; }
       let X = MathExt.mul(MathExt.sub(Y, I), MathExt.inv(MathExt.add(Y, I)));
@@ -494,7 +501,6 @@
         W.push(term);
         term = MathExt.mul(A, term);
       }
-      // Склейка по горизонтали
       let res = MathExt.zeros(A.length, A.length * B[0].length);
       for(let r=0; r<A.length; r++) {
         let cIdx = 0;
@@ -510,7 +516,6 @@
         W.push(term);
         term = MathExt.mul(term, A);
       }
-      // Склейка по вертикали
       let res = MathExt.zeros(A.length * C.length, A.length);
       let rIdx = 0;
       for(let block=0; block<A.length; block++) {
@@ -527,7 +532,6 @@
       let T = Wc, T_inv = MathExt.inv(T);
       let Atilde = MathExt.mul(MathExt.mul(T_inv, A), T);
       let Btilde = MathExt.mul(T_inv, B);
-      // Округление мелких шумов
       return { 
         A_frob: Atilde.map(r=>r.map(v=>Math.abs(v)<1e-8?0:v)), 
         B_frob: Btilde.map(r=>r.map(v=>Math.abs(v)<1e-8?0:v)), 
@@ -538,7 +542,6 @@
       let Wc = MathExt.controllability(A, B);
       if(MathExt.rank(Wc) < A.length) throw new Error("Система неуправляема");
       
-      // Парсинг полюсов (вида "-1", "-1+2i")
       let poles = polesStr.split(',').map(s => {
         s = s.replace(/\s+/g,'').replace(/−/g,'-');
         if(!s.includes('i')) return MathExt.C(parseFloat(s));
@@ -550,9 +553,8 @@
         if(split < 0) return MathExt.C(0, parseFloat(t));
         return MathExt.C(parseFloat(t.slice(0,split)), parseFloat(t.slice(split)));
       });
-      if(poles.length !== A.length) throw new Error(`Нужно ровно ${A.length} полюсов.`);
+      if(poles.length !== A.length) throw new Error(`Нужно ровно ${A.length} полюсов (сейчас распознано ${poles.length}).`);
 
-      // Построение желаемого полинома (z-p1)(z-p2)...
       let coeffs = [MathExt.C(1)];
       for(let p of poles) {
         let nCoeffs = Array(coeffs.length+1).fill(MathExt.C(0));
@@ -563,7 +565,7 @@
         coeffs = nCoeffs;
       }
       let realCoeffs = coeffs.map(c => {
-        if(Math.abs(c.im)>1e-6) throw new Error("Полюса не сопряжены (полином комплексный).");
+        if(Math.abs(c.im)>1e-6) throw new Error("Полюса не сопряжены (полином получился комплексным).");
         return c.re;
       });
 
@@ -578,7 +580,6 @@
       let BT = MathExt.trans(B), AT = MathExt.trans(A);
       let BRB = MathExt.mul(MathExt.mul(B, R_inv), BT);
       
-      // Итерационное решение уравнения Риккати (Continuous)
       for(let i=0; i<100000; i++) {
         let PA = MathExt.mul(P, A);
         let ATP = MathExt.mul(AT, P);
@@ -586,12 +587,12 @@
         let dP = MathExt.sub(MathExt.add(ATP, PA), MathExt.sub(PBRBP, Q));
         
         let nextP = MathExt.add(P, MathExt.smul(dP, dt));
-        nextP = MathExt.smul(MathExt.add(nextP, MathExt.trans(nextP)), 0.5); // симметризация
+        nextP = MathExt.smul(MathExt.add(nextP, MathExt.trans(nextP)), 0.5);
         
         let diff = MathExt.normF(MathExt.sub(nextP, P));
         P = nextP;
         if (diff < 1e-8) break;
-        if (i===99999) throw new Error("LQR не сошёлся. Проверьте стабильность/веса.");
+        if (i===99999) throw new Error("Уравнение Риккати (LQR) не сошлось. Проверьте стабильность и весовые коэффициенты.");
       }
       let K = MathExt.mul(MathExt.mul(R_inv, BT), P);
       return { P, K };
@@ -599,9 +600,14 @@
   };
 
   /* --- UI & STATE MANAGEMENT --- */
+  // Исправлено: переменные объявлены ровно один раз!
   let currentTab = 'A';
   let size = 3;
-  let matrices = { A: MathExt.zeros(7,7), B: MathExt.zeros(7,7), C: MathExt.zeros(7,7) };
+  let matrices = { 
+    A: MathExt.zeros(7,7), 
+    B: MathExt.zeros(7,7), 
+    C: MathExt.zeros(7,7) 
+  };
 
   function initGrid() {
     let container = document.getElementById('matrix-grid');
@@ -613,9 +619,11 @@
         inp.className = 'grid-cell';
         inp.style.minWidth = size>=5 ? '40px' : '50px';
         inp.style.fontSize = size>=5 ? '13px' : '15px';
-        inp.value = matrices[currentTab][r][c] || "";
-        inp.placeholder = "0";
-        inp.oninput = e => matrices[currentTab][r][c] = parseFloat(e.target.value)||0;
+        inp.value = matrices[currentTab][r][c]; // по умолчанию там 0 из MathExt.zeros
+        inp.oninput = e => {
+           let val = parseFloat(e.target.value);
+           matrices[currentTab][r][c] = isNaN(val) ? 0 : val;
+        };
         container.appendChild(inp);
       }
     }
@@ -623,7 +631,8 @@
 
   function changeSize(delta) {
     if (size+delta >= 2 && size+delta <= 7) {
-      size += delta; document.getElementById('size-label').innerText = `${size}×${size}`;
+      size += delta; 
+      document.getElementById('size-label').innerText = `${size}×${size}`;
       initGrid();
     }
   }
@@ -643,17 +652,28 @@
     for(let r=0;r<size;r++) for(let c=0;c<size;c++) matrices[currentTab][r][c] = Math.floor(Math.random()*19)-9;
     initGrid();
   }
-  function clearMat() { matrices[currentTab] = MathExt.zeros(7,7); initGrid(); }
+  
+  function clearMat() { 
+    matrices[currentTab] = MathExt.zeros(7,7); 
+    initGrid(); 
+  }
+  
   function exampleControl() {
     size = 3; document.getElementById('size-label').innerText = "3×3";
     matrices.A = MathExt.zeros(7,7); matrices.B = MathExt.zeros(7,7); matrices.C = MathExt.zeros(7,7);
-    matrices.A[0] = [0, 1, 0, 0,0,0,0]; matrices.A[1] = [0, 0, 1, 0,0,0,0]; matrices.A[2] = [-6, -11, -6, 0,0,0,0];
-    matrices.B[0][0] = 0; matrices.B[1][0] = 0; matrices.B[2][0] = 1;
+    
+    // Аккуратное заполнение, чтобы не сломать массивы
+    matrices.A[0][1] = 1; 
+    matrices.A[1][2] = 1; 
+    matrices.A[2][0] = -6; matrices.A[2][1] = -11; matrices.A[2][2] = -6;
+    
+    matrices.B[2][0] = 1;
     matrices.C[0][0] = 1; matrices.C[1][1] = 1;
     switchMat('A');
   }
 
   function getActive(name) { return matrices[name].map(r => r.slice(0, size)).slice(0, size); }
+  
   function formatOut(mat) {
     if(!mat || !mat.length) return "[]";
     let textMat = mat.map(r => r.map(v => Number.isInteger(v) ? v.toString() : v.toFixed(4).replace(/\.0000$/, '')));
@@ -666,12 +686,21 @@
   
   function showRes(title, text, isErr=false) {
     const card = document.getElementById('result-card');
-    card.style.display = 'block'; card.className = isErr ? 'result-card error' : 'result-card';
+    card.style.display = 'block'; 
+    card.className = isErr ? 'result-card error' : 'result-card';
     document.getElementById('result-title').innerText = title;
     document.getElementById('result-text').innerText = text;
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
-  function runCalc(title, func) { try { let res = func(); showRes(title, res); } catch(e) { showRes(title, e.message, true); } }
+  
+  function runCalc(title, func) { 
+    try { 
+      let res = func(); 
+      showRes(title, res); 
+    } catch(e) { 
+      showRes(title, e.message, true); 
+    } 
+  }
 
   /* --- BASIC CALCS --- */
   function calcBinary(op) { runCalc(op==='add'?'A+B':op==='sub'?'A-B':'A×B', () => formatOut(MathExt[op](getActive('A'), getActive('B')))); }
@@ -751,13 +780,20 @@
     cont.innerHTML = '';
     modMats[arrayRef] = MathExt.zeros(r, c);
     for(let i=0; i<r; i++) for(let j=0; j<c; j++) {
-      let inp = document.createElement('input'); inp.className = 'grid-cell';
-      inp.style.minWidth = '40px'; inp.style.minHeight = '30px'; inp.style.fontSize = '13px';
-      inp.value = ""; inp.placeholder = "0";
-      inp.oninput = e => modMats[arrayRef][i][j] = parseFloat(e.target.value)||0;
+      let inp = document.createElement('input'); 
+      inp.className = 'grid-cell';
+      inp.style.minWidth = '40px'; 
+      inp.style.minHeight = '30px'; 
+      inp.style.fontSize = '13px';
+      inp.value = "0"; 
+      inp.oninput = e => {
+          let val = parseFloat(e.target.value);
+          modMats[arrayRef][i][j] = isNaN(val) ? 0 : val;
+      };
       cont.appendChild(inp);
     }
   }
+  
   function fillGridUI(containerId, data) {
     let cont = document.getElementById(containerId);
     let inputs = cont.getElementsByTagName('input');
@@ -792,6 +828,7 @@
     closeModal('modal-ackermann');
     runCalc('Модальное управление (K)', () => {
       let poles = document.getElementById('ack-poles').value;
+      if (!poles) throw new Error("Введите желаемые полюса!");
       let K = MathExt.ackermann(modMats['ack-a'], modMats['ack-b'], poles);
       let Acl = MathExt.sub(modMats['ack-a'], MathExt.mul(modMats['ack-b'], K));
       return `Вектор K (ОС):\n${formatOut(K)}\n\nМатрица замкнутой системы (A - BK):\n${formatOut(Acl)}`;
