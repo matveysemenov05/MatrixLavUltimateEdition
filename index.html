@@ -86,9 +86,11 @@
     .section-title h2 { margin: 0; }
     .toolbar, .dim, .tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
     .toolbar { margin: 10px 0; }
-    .dim { margin: 0 0 12px; }
-    .dim label { color: var(--muted); font-size: 12px; white-space: nowrap; }
-    .dim input { width: 72px; }
+    
+    /* Выравнивание блока "Скаляр k" */
+    .dim { margin: 0 0 12px; align-items: center; }
+    .dim label { color: var(--muted); font-size: 13px; font-weight: 500; white-space: nowrap; margin-right: 2px; }
+    .dim input { width: 72px; text-align: center; }
 
     .btn {
       display: inline-flex;
@@ -243,7 +245,8 @@
         </div>
         <div class="dim section">
           <label>Скаляр k</label>
-          <input class="field" id="scalar" step="any" type="number" value="2" />
+          <!-- ЗДЕСЬ СКАЛЯР ТЕПЕРЬ 0 -->
+          <input class="field" id="scalar" step="any" type="number" value="0" />
           <button class="btn" onclick="scalarMul()">k × A</button>
           <button class="btn" onclick="power()">Aᵏ</button>
         </div>
@@ -367,19 +370,6 @@
         </div>
       </section>
     </div>
-
-    <section class="card section">
-      <details>
-        <summary>Подсказка по публикации на GitHub Pages</summary>
-        <ol>
-          <li>Создайте репозиторий на GitHub.</li>
-          <li>Загрузите этот файл с именем <code>index.html</code> в корень репозитория.</li>
-          <li>Откройте <b>Settings → Pages</b>, выберите публикацию из ветки <code>main</code> и папки <code>/(root)</code>.</li>
-          <li>Сохраните настройки. После публикации сайт будет доступен по адресу GitHub Pages.</li>
-        </ol>
-        <p class="sub">Никакой сборки, сервера или внешних библиотек не требуется.</p>
-      </details>
-    </section>
   </main>
 
   <footer>
@@ -456,7 +446,8 @@
             inp.type = 'text';
             inp.inputMode = 'decimal';
             inp.setAttribute('aria-label', `${name} ${i + 1},${j + 1}`);
-            inp.value = matrices[name]?.[i]?.[j] ?? 0; // Строго нули при инициализации
+            // Строго нули при инициализации
+            inp.value = matrices[name]?.[i]?.[j] ?? 0; 
             inp.dataset.i = i;
             inp.dataset.j = j;
             g.appendChild(inp);
@@ -876,7 +867,8 @@
 
     function power() {
       run(() => {
-        let k = Number(prompt('Введите целую степень k (может быть отрицательной):', '2'));
+        // Здесь степень по умолчанию тоже стоит 0
+        let k = Number(prompt('Введите целую степень k (может быть отрицательной):', '0'));
         if (!Number.isFinite(k)) return;
         let r = powerM(get('A'), k);
         output(`A^${k}`, showMat(r), r);
@@ -1123,9 +1115,10 @@
     }
 
     // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАПУСКЕ:
-    // Заполняем матрицы исключительно нулями вместо загрузки примера
+    // Матрицы заполняются СТРОГО нулями. 
+    // Размеры при старте: 3x3, 3x1, 3x3
     for (let n of ['A', 'B', 'C']) {
-      matrices[n] = makeMat(...dims[n]);
+      matrices[n] = makeMat(...dims[n]); 
     }
     renderEditors();
     
