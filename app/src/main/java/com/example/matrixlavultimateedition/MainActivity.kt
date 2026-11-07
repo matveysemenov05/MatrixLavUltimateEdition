@@ -1001,7 +1001,7 @@ fun SquareMatricesScreen(
                         }
                     }
 
-                    // КАТЕГОРИЯ 2: СИНТЕЗ УПРАВЛЕНИЯ И ВЫСШИЕ МАТРИЧНЫЕ ФУНКЦИИ
+                    //КАТЕГОРИЯ 2: СИНТЕЗ УПРАВЛЕНИЯ И ВЫСШИЕ МАТРИЧНЫЕ ФУНКЦИИ
                     else -> {
                         SectionHeader("Синтез регуляторов и канонические формы (ТАУ)")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
