@@ -1046,8 +1046,9 @@
       const widths = Array.from({ length: cols }, (_, c) => Math.max(...f.map(r => r[c].length)));
       return f.map((row, idx) => {
         const line = row.map((v, c) => v.padStart(widths[c], " ")).join("  ");
-        const l = f.length === 1 ? "⎡" : idx === 0 ? "⎡" : idx === f.length - 1 ? "⎣" : "⎢";
-        const r = f.length === 1 ? "⎤" : idx === 0 ? "⎤" : idx === f.length - 1 ? "⎦" : "⎥";
+        if (f.length === 1) return `[ ${line} ]`;
+        const l = idx === 0 ? "⎡" : idx === f.length - 1 ? "⎣" : "⎢";
+        const r = idx === 0 ? "⎤" : idx === f.length - 1 ? "⎦" : "⎥";
         return `${l} ${line} ${r}`;
       }).join("\n");
     }
