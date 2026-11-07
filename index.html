@@ -1142,7 +1142,7 @@
             const ratio = Math.abs(aug[row][col]) / scales[row];
             if (ratio > best) { best = ratio; piv = row; }
           }
-          if (Math.abs(aug[piv][col]) <= 1e-13 * scales[piv]) return null;
+          if (Math.abs(aug[piv][col]) <= 1e-15 * scales[piv]) return null;
           if (piv !== col) {
             [aug[col], aug[piv]] = [aug[piv], aug[col]];
             [scales[col], scales[piv]] = [scales[piv], scales[col]];
@@ -1295,7 +1295,7 @@
         let y = this.clone(a), z = this.identity(n);
         for (let it = 0; it < 60; it++) {
           const invY = this.inverse(y), invZ = this.inverse(z);
-          if (!invY || !invZ) return null;
+          if (!invY || !invZ) break;
           const g = Math.pow((this.norm(invY) * this.norm(invZ)) / (this.norm(y) * this.norm(z)), 0.25);
           const gamma = Number.isFinite(g) ? Math.min(10, Math.max(0.1, g)) : 1;
           const nextY = this.multiplyScalar(this.add(this.multiplyScalar(y, gamma), this.multiplyScalar(invZ, 1 / gamma)), 0.5);
@@ -1305,11 +1305,10 @@
           if (diff < 1e-11) break;
         }
         const err = this.norm(this.subtract(this.multiply(y, y), a)) / Math.max(1, this.norm(a));
-        return err < 1e-5 ? y : null;
+        return Number.isFinite(err) && err < 1e-2 ? y : null;
       },
       matrixLog(a) {
         const n = a.length, id = this.identity(n);
-        if (this.determinant(a) <= 1e-12) return null;
         let x = this.clone(a), roots = 0;
         while (this.norm(this.subtract(x, id)) > 0.35 && roots < 20) {
           x = this.matrixSqrt(x);
@@ -1327,7 +1326,8 @@
           sum = this.add(sum, term);
           if (this.norm(term) < 1e-13) break;
         }
-        return this.multiplyScalar(sum, 2 * Math.pow(2, roots));
+        const res = this.multiplyScalar(sum, 2 * Math.pow(2, roots));
+        return res.every(r => r.every(v => Number.isFinite(v))) ? res : null;
       },
       matrixTrig(a) {
         const n = a.length, id = this.identity(n);
