@@ -1092,26 +1092,26 @@
       const signStr = value < 0 ? "−" : "";
       const absVal = Math.abs(value);
 
-      // 1. Точная рациональная дробь p/q (например, в A^-1, Аккермане, Гауссе)
-      const exactRat = findExactFraction(absVal, 9999, 1e-6);
-      if (exactRat) {
-        return { isFraction: true, sign: signStr, num: String(exactRat[0]), den: String(exactRat[1]), suffix: "" };
+      // 1. Сначала только короткие дроби со знаменателем до 24 (1/2, 1/3, 3/4)
+      const shortRat = findExactFraction(absVal, 24, 1e-6);
+      if (shortRat) {
+        return { isFraction: true, sign: signStr, num: String(shortRat[0]), den: String(shortRat[1]), suffix: "" };
       }
 
       // 2. Выражения с экспонентой вида (a * e^k + b) / q (для e^A)
-      for (const k of [1, 2, 3, 4, -1, -2, 5, 6, -3, -4, 7, 8]) {
+      for (const k of [1, 2, 3, 4, -1, -2, 5, 6, -3, -4, 7, 8, 9, 10, -5, -6]) {
         const ePow = Math.exp(k);
         const eStr = k === 1 ? "e" : `e${toSuperscript(k)}`;
-        for (let q = 1; q <= 24; q++) {
+        for (let q = 1; q <= 16; q++) {
           const scaled = value * q;
-          for (let a = -24; a <= 24; a++) {
+          for (let a = -16; a <= 16; a++) {
             if (a === 0) continue;
             const rem = scaled - a * ePow;
             const b = Math.round(rem);
-            if (Math.abs(b) > 24) continue;
+            if (Math.abs(b) > 16) continue;
             const approx = (a * ePow + b) / q;
             const relErr = Math.abs(value - approx) / Math.max(1, Math.abs(value));
-            if (relErr <= 1e-6) {
+            if (relErr <= 1e-5) {
               const g = gcd(gcd(a, b), q);
               const a1 = a / g, b1 = b / g, q1 = q / g;
               const aTerm = a1 === 1 ? eStr : a1 === -1 ? `−${eStr}` : `${a1}${eStr}`;
@@ -1135,16 +1135,16 @@
           const prefix = nearInt === 1 ? "" : String(nearInt);
           return { isFraction: false, plainText: `${signStr}${prefix}${rStr}` };
         }
-        const rf = findExactFraction(ratio, 50, 1e-5);
+        const rf = findExactFraction(ratio, 24, 1e-5);
         if (rf) {
           return { isFraction: true, sign: signStr, num: String(rf[0]), den: String(rf[1]), suffix: rStr };
         }
       }
 
-      // 4. Мягкий поиск дроби для округленных чисел
-      const softRat = findExactFraction(absVal, 2000, 5e-4);
-      if (softRat) {
-        return { isFraction: true, sign: signStr, num: String(softRat[0]), den: String(softRat[1]), suffix: "" };
+      // 4. Все остальные дроби со знаменателем до 9999 (для A^-1)
+      const anyRat = findExactFraction(absVal, 9999, 5e-4);
+      if (anyRat) {
+        return { isFraction: true, sign: signStr, num: String(anyRat[0]), den: String(anyRat[1]), suffix: "" };
       }
 
       return { isFraction: false, plainText: formatDecimal(value) };
