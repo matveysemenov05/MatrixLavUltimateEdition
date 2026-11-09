@@ -1788,7 +1788,7 @@
             for (let deg = 2; chainVectors.length < n && deg <= n; deg++) {
               curPow = mulComplexMat(curPow, nMat);
               const extBasis = nullspaceComplex(curPow);
-              for (const cand of extBasis) {
+              for (const cand of [...extBasis].reverse()) {
                 if (isIndependent(chainVectors.map(p => p.vec), cand)) {
                   // Согласуем знак и масштаб присоединенного вектора h так, чтобы (A - λI)h = +v_prev!
                   const mapped = mulComplexMatVec(nMat, cand);
