@@ -1629,44 +1629,54 @@
       },
       eigenvectorsWithDetails(matrix, eigs) {
         const n = matrix.length;
-        const scale = Math.max(1, ...matrix.flat().map(v => Math.abs(v)));
         const usedMult = {};
 
-        const formatBothForms = (vec) => {
+        const prettyNormalizeEigen = (vec) => {
           let maxAbs = 0;
           for (const v of vec) maxAbs = Math.max(maxAbs, v.abs());
-          if (maxAbs < 1e-12) return { canon: "[ 0 ]ᵀ", unit: "[ 0 ]ᵀ" };
-
-          // 1. Нормированный вид (единичная длина L2)
-          let l2Norm = 0;
-          for (const v of vec) l2Norm = Math.hypot(l2Norm, v.abs());
-          const normalizedL2 = vec.map(v => v.div(l2Norm || 1));
-          const unitStr = "[ " + normalizedL2.map(v => v.toString()).join(", ") + " ]ᵀ";
-
-          // 2. Ненормированный (целочисленный / канонический) вид
+          if (maxAbs < 1e-12) return vec;
           const nonZero = vec.filter(v => v.abs() > 1e-4 * maxAbs);
           let ref = nonZero[0];
           for (const v of nonZero) if (v.abs() < ref.abs()) ref = v;
+          const firstNZ = vec.find(v => v.abs() > 1e-4 * maxAbs);
+          if (firstNZ && ref.re !== 0 && (firstNZ.re / ref.re < 0)) ref = ref.neg();
+
           const test = vec.map(v => v.div(ref));
           const allNice = test.every(v =>
             Math.abs(v.re - Math.round(v.re)) < 1e-3 &&
             Math.abs(v.im - Math.round(v.im)) < 1e-3 &&
             v.abs() <= 20
           );
-
-          let canonVec;
           if (allNice) {
-            canonVec = test.map(v => new Complex(
+            return test.map(v => new Complex(
               Math.abs(v.re) < 1e-5 ? 0 : Math.round(v.re),
               Math.abs(v.im) < 1e-5 ? 0 : Math.round(v.im)
             ));
-          } else {
-            let biggest = nonZero[0];
-            for (const v of nonZero) if (v.abs() > biggest.abs()) biggest = v;
-            canonVec = vec.map(v => v.div(biggest));
           }
+          let biggest = nonZero[0];
+          for (const v of nonZero) if (v.abs() > biggest.abs()) biggest = v;
+          return vec.map(v => v.div(biggest));
+        };
+
+        const formatBothForms = (vec, keepExactSign = false) => {
+          let maxAbs = 0;
+          for (const v of vec) maxAbs = Math.max(maxAbs, v.abs());
+          if (maxAbs < 1e-12) return { canon: "[ 0 ]ᵀ", unit: "[ 0 ]ᵀ", canonVec: vec };
+
+          const canonVec = keepExactSign
+            ? vec.map(v => new Complex(
+                Math.abs(v.re - Math.round(v.re)) < 1e-4 ? Math.round(v.re) : v.re,
+                Math.abs(v.im - Math.round(v.im)) < 1e-4 ? Math.round(v.im) : v.im
+              ))
+            : prettyNormalizeEigen(vec);
+
+          let l2Norm = 0;
+          for (const v of canonVec) l2Norm = Math.hypot(l2Norm, v.abs());
+          const normalizedL2 = canonVec.map(v => v.div(l2Norm || 1));
+
           const canonStr = "[ " + canonVec.map(v => v.toString()).join(", ") + " ]ᵀ";
-          return { canon: canonStr, unit: unitStr };
+          const unitStr = "[ " + normalizedL2.map(v => v.toString()).join(", ") + " ]ᵀ";
+          return { canon: canonStr, unit: unitStr, canonVec };
         };
 
         const nullspaceComplex = (mInput) => {
@@ -1703,6 +1713,52 @@
           });
         };
 
+        const solveAssociatedSystem = (nMat, rhs) => {
+          const aug = nMat.map((row, r) => [...row, rhs[r]]);
+          const pivCols = [];
+          let pivRow = 0;
+          for (let col = 0; col < n && pivRow < n; col++) {
+            let best = pivRow;
+            for (let r = pivRow + 1; r < n; r++) if (aug[r][col].abs() > aug[best][col].abs()) best = r;
+            if (aug[best][col].abs() <= 1e-5) continue;
+            [aug[pivRow], aug[best]] = [aug[best], aug[pivRow]];
+            const pv = aug[pivRow][col];
+            for (let j = col; j <= n; j++) aug[pivRow][j] = aug[pivRow][j].div(pv);
+            for (let r = 0; r < n; r++) {
+              if (r === pivRow) continue;
+              const f = aug[r][col];
+              for (let j = col; j <= n; j++) aug[r][j] = aug[r][j].sub(f.mul(aug[pivRow][j]));
+            }
+            pivCols.push(col);
+            pivRow++;
+          }
+          for (let r = pivRow; r < n; r++) {
+            if (aug[r][n].abs() > 1e-4) return null;
+          }
+          const h0 = Array.from({ length: n }, () => new Complex(0));
+          pivCols.forEach((col, r) => { h0[col] = aug[r][n]; });
+
+          const kerBasis = nullspaceComplex(nMat);
+          const candidates = [h0];
+          for (const kv of kerBasis) {
+            for (const c of [1, -1]) {
+              candidates.push(h0.map((v, i) => v.add(kv[i].mul(c))));
+            }
+          }
+          candidates.sort((a, b) => {
+            const nzA = a.filter(x => x.abs() > 1e-5).length;
+            const nzB = b.filter(x => x.abs() > 1e-5).length;
+            if (nzA !== nzB) return nzA - nzB;
+            const negA = a.filter(x => x.re < -1e-5).length;
+            const negB = b.filter(x => x.re < -1e-5).length;
+            if (negA !== negB) return negA - negB;
+            const firstA = a.findIndex(x => x.abs() > 1e-5);
+            const firstB = b.findIndex(x => x.abs() > 1e-5);
+            return firstB - firstA;
+          });
+          return candidates[0];
+        };
+
         const mulComplexMat = (m1, m2) => {
           const out = Array.from({ length: n }, () => Array.from({ length: n }, () => new Complex(0)));
           for (let i = 0; i < n; i++) {
@@ -1716,7 +1772,7 @@
         };
 
         const isIndependent = (existing, candidate) => {
-          if (!existing.length) return true;
+          if (!existing.length) return candidate.some(x => x.abs() > 1e-5);
           const cols = existing.length + 1;
           const realMat = Array.from({ length: 2 * n }, () => Array(2 * cols).fill(0));
           existing.forEach((vec, c) => {
@@ -1737,42 +1793,55 @@
           return this.rank(realMat) / 2 > existing.length;
         };
 
+        const clusterCache = {};
+
         return eigs.map((lam, idx) => {
           let rep = idx;
           for (let p = 0; p < idx; p++) {
-            if (eigs[p].sub(lam).abs() <= 1e-4 * scale) { rep = p; break; }
+            if (eigs[p].sub(lam).abs() <= 1e-4) { rep = p; break; }
           }
           const mIdx = usedMult[rep] || 0;
           usedMult[rep] = mIdx + 1;
 
-          const nMat = Array.from({ length: n }, (_, i) =>
-            Array.from({ length: n }, (_, j) => {
-              const v = new Complex(matrix[i][j] / scale);
-              return i === j ? v.sub(new Complex(lam.re / scale, lam.im / scale)) : v;
-            })
-          );
+          if (!clusterCache[rep]) {
+            const nMat = Array.from({ length: n }, (_, i) =>
+              Array.from({ length: n }, (_, j) => {
+                const v = new Complex(matrix[i][j]);
+                return i === j ? v.sub(lam) : v;
+              })
+            );
 
-          const chainVectors = [];
-          for (const vec of nullspaceComplex(nMat)) {
-            if (isIndependent(chainVectors.map(p => p.vec), vec)) {
-              chainVectors.push({ vec, level: 1 });
-            }
-          }
-
-          let curPow = nMat;
-          for (let deg = 2; chainVectors.length <= mIdx && deg <= n; deg++) {
-            curPow = mulComplexMat(curPow, nMat);
-            const extBasis = nullspaceComplex(curPow);
-            for (const cand of extBasis) {
-              if (isIndependent(chainVectors.map(p => p.vec), cand)) {
-                chainVectors.push({ vec: cand, level: deg });
-                if (chainVectors.length > mIdx) break;
+            const chainVectors = [];
+            for (const rawVec of nullspaceComplex(nMat)) {
+              const normVec = prettyNormalizeEigen(rawVec);
+              if (isIndependent(chainVectors.map(p => p.vec), normVec)) {
+                chainVectors.push({ vec: normVec, level: 1 });
               }
             }
+
+            let curPow = nMat;
+            for (let deg = 2; chainVectors.length < n && deg <= n; deg++) {
+              const prevVectors = chainVectors.filter(p => p.level === deg - 1);
+              for (const pv of prevVectors) {
+                const hSol = solveAssociatedSystem(nMat, pv.vec);
+                if (hSol && isIndependent(chainVectors.map(p => p.vec), hSol)) {
+                  chainVectors.push({ vec: hSol, level: deg });
+                }
+              }
+              curPow = mulComplexMat(curPow, nMat);
+              const extBasis = nullspaceComplex(curPow);
+              for (const cand of extBasis) {
+                if (isIndependent(chainVectors.map(p => p.vec), cand)) {
+                  chainVectors.push({ vec: cand, level: deg });
+                }
+              }
+            }
+            clusterCache[rep] = chainVectors;
           }
 
+          const chainVectors = clusterCache[rep];
           const chosen = chainVectors[mIdx] || chainVectors[chainVectors.length - 1] || { vec: Array(n).fill(new Complex(0)), level: 1 };
-          const normInfo = formatBothForms(chosen.vec);
+          const normInfo = formatBothForms(chosen.vec, chosen.level > 1);
 
           return {
             index: idx + 1,
