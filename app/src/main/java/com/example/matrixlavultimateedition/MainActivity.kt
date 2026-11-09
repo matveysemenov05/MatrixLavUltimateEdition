@@ -51,7 +51,6 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.random.Random
 
-// Unified Matrix Lab design tokens
 val BgDark = Color(0xFF080D18)
 val CardDark = Color(0xFF111A2B)
 val CardElevated = Color(0xFF17233A)
@@ -375,7 +374,6 @@ fun SquareMatricesScreen(
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
 
-    // Выбранная категория операций: 0 = Алгебра, 1 = ТАУ и Спектр, 2 = Синтез и Функции
     var operationCategory by rememberSaveable { mutableIntStateOf(0) }
 
     var lastResultTitle by remember { mutableStateOf("Результат") }
@@ -512,7 +510,6 @@ fun SquareMatricesScreen(
             .verticalScroll(scrollState),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- ВЕРХНЯЯ ПАНЕЛЬ ВЫБОРА МАТРИЦЫ A / B / C И РАЗМЕРА ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -543,7 +540,6 @@ fun SquareMatricesScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // --- СЕТКА ВВОДА МАТРИЦЫ ---
         MatrixGridInput(
             rows = size,
             cols = size,
@@ -559,7 +555,6 @@ fun SquareMatricesScreen(
             }
         )
 
-        // --- БЫСТРЫЕ ДЕЙСТВИЯ НАД ЯЧЕЙКАМИ (Рандом, Единичная I, Вставить, Очистить) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -590,7 +585,6 @@ fun SquareMatricesScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // --- ПЕРЕКЛЮЧАТЕЛЬ КАТЕГОРИЙ ОПЕРАЦИЙ (ВМЕСТО ДЛИННОЙ ПРОСТЫНИ КНОПОК) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -607,7 +601,6 @@ fun SquareMatricesScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // --- СОДЕРЖИМОЕ ВЫБРАННОЙ КАТЕГОРИИ ОПЕРАЦИЙ ---
         AnimatedContent(
             targetState = operationCategory,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -622,7 +615,6 @@ fun SquareMatricesScreen(
                     .padding(12.dp)
             ) {
                 when (category) {
-                    // КАТЕГОРИЯ 0: БАЗОВАЯ АЛГЕБРА И СВОЙСТВА МАТРИЦЫ
                     0 -> {
                         SectionHeader("Свойства и унарные операции над [$tabName]")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -825,7 +817,6 @@ fun SquareMatricesScreen(
                         }
                     }
 
-                    // КАТЕГОРИЯ 1: СПЕКТРАЛЬНЫЙ АНАЛИЗ, ЖНФ И КРИТЕРИИ КАЛМАНА
                     1 -> {
                         SectionHeader("Спектр и канонические формы матрицы [$tabName]")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -846,13 +837,20 @@ fun SquareMatricesScreen(
                             }
                             AdaptiveBtn("v_i (Векторы)", Modifier.weight(1f), colorType = 2) {
                                 try {
-                                    lastResultTitle = "Собственные векторы v_i ($tabName)"
+                                    lastResultTitle = "Собственные и присоед. векторы ($tabName)"
                                     val raw = parse(currentData)
                                     val eig = math.eigenvalues(raw)
-                                    val vectors = math.eigenvectors(raw, eig)
-                                    val text = vectors.mapIndexed { idx, v ->
-                                        "v_${idx + 1} (λ_${idx + 1} = ${eig[idx]}):\n[ " + v.joinToString(", ") { it.toString() } + " ]ᵀ"
-                                    }.joinToString("\n\n")
+                                    val vectorsInfo = math.eigenvectorsWithDetails(raw, eig)
+                                    val text = vectorsInfo.joinToString("\n\n") { info ->
+                                        val typeStr = if (info.isAssociated) {
+                                            "Присоединенный вектор (ур. ${info.chainLevel})"
+                                        } else {
+                                            "Собственный вектор"
+                                        }
+                                        "v_${info.index} (λ_${info.index} = ${info.lambda}) — $typeStr:\n" +
+                                                "  Ненормированный: ${info.canon}\n" +
+                                                "  Нормированный:   ${info.unit}"
+                                    }
                                     resultScalarText = text
                                     lastResultMatrix = null; lastResultGrid = null; isError = false
                                     onAddToHistory(HistoryItem(title = lastResultTitle, resultText = text, resultMatrix = null))
@@ -1001,33 +999,49 @@ fun SquareMatricesScreen(
                         }
                     }
 
-                    //КАТЕГОРИЯ 2: СИНТЕЗ УПРАВЛЕНИЯ И ВЫСШИЕ МАТРИЧНЫЕ ФУНКЦИИ
                     else -> {
                         SectionHeader("Синтез регуляторов и канонические формы (ТАУ)")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             AdaptiveBtn("Фробениус (A,B)", Modifier.weight(1f), colorType = 2) {
-                                frobSize = 2; frobSizeInput = "2"
-                                frobA = List(2) { List(2) { "0" } }
-                                frobB = List(2) { listOf("0") }
+                                // Автоматически берем текущие матрицы A и первый столбец B с главного экрана
+                                frobSize = size
+                                frobSizeInput = size.toString()
+                                frobA = resizeMatrix(matrixA, size, size)
+                                frobB = List(size) { r -> listOf(matrixB.getOrNull(r)?.getOrNull(0) ?: "0") }
                                 showFrobeniusDialog = true
                             }
                             AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) {
-                                designSize = 2; designSizeInput = "2"
-                                designA = List(2) { List(2) { "0" } }
-                                designB = List(2) { listOf("0") }
-                                polesInput = "0, 0"
-                                poleAssignments = List(2) { "0" }
+                                // Автоматически берем текущие матрицы A и первый столбец B с главного экрана
+                                designSize = size
+                                designSizeInput = size.toString()
+                                designA = resizeMatrix(matrixA, size, size)
+                                designB = List(size) { r -> listOf(matrixB.getOrNull(r)?.getOrNull(0) ?: "0") }
+                                val initEigs = runCatching { math.eigenvalues(parse(designA)) }.getOrDefault(emptyList())
+                                poleAssignments = List(size) { i -> initEigs.getOrNull(i)?.toString()?.replace(" ", "") ?: "-1" }
                                 showPolesDialog = true
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             AdaptiveBtn("LQR-оптимизация (Уравнение Риккати CARE)", Modifier.weight(1f), colorType = 2) {
-                                lqrN = 2; lqrM = 1; lqrNInput = "2"; lqrMInput = "1"
-                                lqrAInput = List(2) { List(2) { "0" } }
-                                lqrBInput = List(2) { listOf("0") }
-                                lqrQInput = identityStringGrid(2)
-                                lqrRInput = identityStringGrid(1)
+                                // Автоматически берем A, B (определяем число ненулевых столбцов m) и C (в Q) с главного экрана
+                                lqrN = size
+                                lqrNInput = size.toString()
+                                val parsedB = runCatching { parse(matrixB) }.getOrNull()
+                                val activeCols = if (parsedB != null) {
+                                    val lastNonZeroCol = (size - 1 downTo 0).firstOrNull { col ->
+                                        (0 until size).any { row -> abs(parsedB[row][col]) > 1e-12 }
+                                    } ?: 0
+                                    (lastNonZeroCol + 1).coerceIn(1, size)
+                                } else 1
+                                lqrM = activeCols
+                                lqrMInput = lqrM.toString()
+                                lqrAInput = resizeMatrix(matrixA, lqrN, lqrN)
+                                lqrBInput = resizeMatrix(matrixB, lqrN, lqrM)
+                                val parsedC = runCatching { parse(matrixC) }.getOrNull()
+                                val isZeroC = parsedC == null || parsedC.all { row -> row.all { abs(it) < 1e-12 } }
+                                lqrQInput = if (isZeroC) identityStringGrid(lqrN) else resizeMatrix(matrixC, lqrN, lqrN)
+                                lqrRInput = identityStringGrid(lqrM)
                                 showLqrDialog = true
                             }
                         }
@@ -1117,9 +1131,9 @@ fun SquareMatricesScreen(
                 resultScalarText = ""
                 isError = false
             },
-            onTransferToA = { mat -> transferSquareOrResize(onMatrixAChange, mat, "A") },
-            onTransferToB = { mat -> transferSquareOrResize(onMatrixBChange, mat, "B") },
-            onTransferToC = { mat -> transferSquareOrResize(onMatrixCChange, mat, "C") }
+            onTransferToA = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixAChange, mat, "A") },
+            onTransferToB = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixBChange, mat, "B") },
+            onTransferToC = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixCChange, mat, "C") }
         )
     }
 
@@ -1174,6 +1188,21 @@ fun SquareMatricesScreen(
         )
     }
 
+    fun syncDialogToMain(newN: Int, newA: List<List<String>>, newB: List<List<String>>, newC: List<List<String>>? = null) {
+        if (size != newN) onSizeChange(newN)
+        onMatrixAChange(resizeMatrix(newA, newN, newN))
+        val mergedB = List(newN) { r ->
+            List(newN) { c ->
+                if (r < newB.size && c < newB[r].size) newB[r][c]
+                else matrixB.getOrNull(r)?.getOrNull(c) ?: "0"
+            }
+        }
+        onMatrixBChange(mergedB)
+        if (newC != null) {
+            onMatrixCChange(resizeMatrix(newC, newN, newN))
+        }
+    }
+
     if (showFrobeniusDialog) {
         AlertDialog(
             onDismissRequest = { showFrobeniusDialog = false },
@@ -1188,13 +1217,12 @@ fun SquareMatricesScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "A должна быть n×n, B — n×1. Для результата требуется полностью управляемая система.",
+                        text = "Матрица A и первый столбец B синхронизированы с главным экраном.",
                         color = TextDim,
                         fontSize = 12.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 18.sp
+                        textAlign = TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1202,61 +1230,49 @@ fun SquareMatricesScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Размер n:", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(76.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, AccentCyan, RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            BasicTextField(
-                                value = frobSizeInput,
-                                onValueChange = { input ->
-                                    if (input.isEmpty() || input.all { it.isDigit() }) {
-                                        frobSizeInput = input
-                                        val n = input.toIntOrNull()
-                                        if (n != null && n in 2..7 && n != frobSize) {
-                                            frobSize = n
-                                            frobA = resizeMatrix(frobA, n, n)
-                                            frobB = resizeMatrix(frobB, n, 1)
-                                        }
-                                    }
-                                },
-                                textStyle = TextStyle(color = TextWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-                                cursorBrush = SolidColor(AccentCyan),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
-                        }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("от 2 до 7", color = TextDim, fontSize = 11.sp)
+                        CounterButton("−", frobSize > 2) {
+                            if (frobSize > 2) {
+                                frobSize--; frobSizeInput = frobSize.toString()
+                                frobA = resizeMatrix(frobA, frobSize, frobSize)
+                                frobB = resizeMatrix(frobB, frobSize, 1)
+                                syncDialogToMain(frobSize, frobA, frobB)
+                            }
+                        }
+                        Text("${frobSize}×$frobSize", color = TextWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
+                        CounterButton("+", frobSize < 7) {
+                            if (frobSize < 7) {
+                                frobSize++; frobSizeInput = frobSize.toString()
+                                frobA = resizeMatrix(frobA, frobSize, frobSize)
+                                frobB = resizeMatrix(frobB, frobSize, 1)
+                                syncDialogToMain(frobSize, frobA, frobB)
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     Text("МАТРИЦА A (${frobSize}×${frobSize})", color = AccentCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     MatrixGridInput(frobSize, frobSize, frobA, AccentCyan, 46.dp, 13.sp) { r, c, v ->
                         frobA = frobA.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+                        syncDialogToMain(frobSize, frobA, frobB)
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     Text("МАТРИЦА B (${frobSize}×1)", color = AccentPurple, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     MatrixGridInput(frobSize, 1, frobB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
                         frobB = frobB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
+                        syncDialogToMain(frobSize, frobA, frobB)
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     try {
+                        syncDialogToMain(frobSize, frobA, frobB)
                         val a = parse(frobA)
                         val b = parse(frobB)
-                        require(a.size == a.firstOrNull()?.size && a.size >= 2) { "Матрица A должна быть квадратной n×n" }
-                        require(b.size == a.size && b.all { it.size == 1 }) { "Матрица B должна иметь размер ${a.size}×1" }
                         val res = math.frobeniusForm(a, b)
                         require(res != null) { "Форма Фробениуса недоступна: проверьте управляемость системы." }
                         val (aTilde, bTilde, tMat) = res
@@ -1290,88 +1306,136 @@ fun SquareMatricesScreen(
             onDismissRequest = { showPolesDialog = false },
             title = { Text("Модальное управление (K)", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
             text = {
-                Column(modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState())) {
-                    Text("Матрицы для метода Аккермана: A (n×n), B (n×1).", color = TextDim, fontSize = 12.sp)
+                val modalAnalysis = remember(designA, designB) {
+                    runCatching {
+                        val aMat = parse(designA)
+                        val bMat = parse(designB)
+                        val eigs = math.eigenvalues(aMat)
+                        val flags = math.getControllableModeFlags(aMat, bMat, eigs)
+                        val r = flags.count { it }
+                        Triple(eigs, flags, r)
+                    }.getOrNull()
+                }
+                val eigenvaluesForTable = modalAnalysis?.first ?: emptyList()
+                val ctrlFlags = modalAnalysis?.second ?: BooleanArray(designSize) { true }
+                val ctrlRank = modalAnalysis?.third ?: designSize
+
+                Column(modifier = Modifier.heightIn(max = 580.dp).verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Система в реальном времени синхронизирована с главным экраном.",
+                        color = TextDim,
+                        fontSize = 11.5.sp
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Размер n:", color = TextWhite)
-                        Box(
-                            modifier = Modifier
-                                .width(84.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, AccentCyan, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 12.dp, vertical = 9.dp)
-                        ) {
-                            BasicTextField(
-                                value = designSizeInput,
-                                onValueChange = { input ->
-                                    if (input.isEmpty() || input.all { it.isDigit() }) {
-                                        designSizeInput = input
-                                        val n = input.toIntOrNull()
-                                        if (n != null && n in 2..7 && n != designSize) {
-                                            designSize = n
-                                            designA = resizeMatrix(designA, n, n)
-                                            designB = resizeMatrix(designB, n, 1)
-                                            polesInput = List(n) { "0" }.joinToString(", ")
-                                            poleAssignments = List(n) { "0" }
-                                        }
-                                    }
-                                },
-                                textStyle = TextStyle(color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                                cursorBrush = SolidColor(AccentCyan),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                            )
+                        Text("Размер n:", color = TextWhite, fontWeight = FontWeight.SemiBold)
+                        CounterButton("−", designSize > 2) {
+                            if (designSize > 2) {
+                                designSize--; designSizeInput = designSize.toString()
+                                designA = resizeMatrix(designA, designSize, designSize)
+                                designB = resizeMatrix(designB, designSize, 1)
+                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                syncDialogToMain(designSize, designA, designB)
+                            }
                         }
-                        Text("от 2 до 7", color = TextDim, fontSize = 11.sp)
+                        Text("${designSize}×$designSize", color = TextWhite, fontWeight = FontWeight.Bold)
+                        CounterButton("+", designSize < 7) {
+                            if (designSize < 7) {
+                                designSize++; designSizeInput = designSize.toString()
+                                designA = resizeMatrix(designA, designSize, designSize)
+                                designB = resizeMatrix(designB, designSize, 1)
+                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                syncDialogToMain(designSize, designA, designB)
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("A (${designSize}×${designSize})", color = AccentCyan, fontWeight = FontWeight.Bold)
                     MatrixGridInput(designSize, designSize, designA, AccentCyan, 42.dp, 12.sp) { r, c, v ->
                         designA = designA.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+                        syncDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("B (${designSize}×1)", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(designSize, 1, designB, AccentPurple, 48.dp, 13.sp) { r, _, v ->
+                    MatrixGridInput(designSize, 1, designB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
                         designB = designB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
+                        syncDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("Желаемые полюса замкнутой системы A − BK:", color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Комплексные полюса задавайте сопряженными парами (например, -2+2i и -2-2i).", color = TextDim, fontSize = 11.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    val eigenvaluesForTable = remember(designA) {
-                        runCatching { math.eigenvalues(parse(designA)) }.getOrDefault(emptyList())
+
+                    val rankStatus = when {
+                        ctrlRank == designSize -> "✅ Полностью управляема (rank W_c = $ctrlRank)"
+                        ctrlRank > 0 -> "⚠️ Частично управляема: управляемых мод $ctrlRank из $designSize.\nИзменяйте полюса напротив управляемых мод (неуправляемые фиксированы)!"
+                        else -> "❌ Неуправляема (rank W_c = 0)"
                     }
+                    Text(rankStatus, color = if (ctrlRank == designSize) AccentEmerald else AccentAmber, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Таблица соответствий (исходное λᵢ ➔ новый полюс μᵢ):", color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
                     repeat(designSize) { index ->
                         val eig = eigenvaluesForTable.getOrNull(index)
-                        val eigText = if (eig == null) "λ${index + 1} (исх.)" else "λ${index + 1} = $eig"
+                        val isCtrl = ctrlFlags.getOrElse(index) { true }
+                        val statusTag = if (ctrlRank < designSize) {
+                            if (isCtrl) " [упр.]" else " [неупр.]"
+                        } else ""
+                        val eigText = if (eig == null) {
+                            "λ${toSubscript((index + 1).toString())}$statusTag"
+                        } else {
+                            "λ${toSubscript((index + 1).toString())} = $eig$statusTag"
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
                         ) {
-                            Text(eigText, color = AccentCyan, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                            Box(
-                                modifier = Modifier
-                                    .width(115.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF0F172A))
-                                    .border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp))
-                                    .padding(9.dp)
-                            ) {
-                                BasicTextField(
-                                    value = poleAssignments.getOrElse(index) { "0" },
-                                    onValueChange = { value ->
-                                        poleAssignments = List(designSize) { i ->
-                                            if (i == index) value else poleAssignments.getOrElse(i) { "0" }
-                                        }
-                                    },
-                                    textStyle = TextStyle(color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                                    cursorBrush = SolidColor(AccentCyan),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true
-                                )
+                            Text(
+                                text = eigText,
+                                color = if (isCtrl) AccentCyan else TextDim,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isCtrl) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isCtrl) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(110.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF0F172A))
+                                        .border(1.dp, AccentCyan.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                        .padding(9.dp)
+                                ) {
+                                    BasicTextField(
+                                        value = poleAssignments.getOrElse(index) { "-1" },
+                                        onValueChange = { value ->
+                                            poleAssignments = List(designSize) { i ->
+                                                if (i == index) value else poleAssignments.getOrElse(i) { "-1" }
+                                            }
+                                        },
+                                        textStyle = TextStyle(color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                                        cursorBrush = SolidColor(AccentCyan),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .width(110.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF161F30))
+                                        .border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp))
+                                        .padding(9.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        text = "${eig ?: "фикс."} 🔒",
+                                        color = TextDim,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     }
@@ -1380,18 +1444,44 @@ fun SquareMatricesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     try {
+                        syncDialogToMain(designSize, designA, designB)
                         val aForDesign = parse(designA)
                         val bForDesign = parse(designB)
-                        val poles = poleAssignments.take(aForDesign.size).mapIndexed { index, raw ->
-                            val parsed = math.parsePoles(raw)
-                            require(parsed.size == 1) { "Для полюса μ${index + 1} укажите ровно одно число" }
-                            parsed.single()
+                        val openEigs = math.eigenvalues(aForDesign)
+                        val flags = math.getControllableModeFlags(aForDesign, bForDesign, openEigs)
+                        val r = flags.count { it }
+
+                        val poles = List(aForDesign.size) { index ->
+                            if (!flags[index]) {
+                                openEigs[index]
+                            } else {
+                                val raw = poleAssignments.getOrElse(index) { "-1" }
+                                val parsed = math.parsePoles(raw)
+                                require(parsed.size == 1) { "Для полюса μ${index + 1} укажите ровно одно число" }
+                                parsed.single()
+                            }
                         }
+
                         val kMat = math.ackermann(aForDesign, bForDesign, poles)
-                        lastResultTitle = "Модальное управление (Аккерман)"
+                        val closedLoop = math.subtract(aForDesign, math.multiply(bForDesign, kMat)!!)!!
+                        val newSpectrum = math.eigenvalues(closedLoop)
+                        val isStabilized = newSpectrum.all { it.re < -1e-7 }
+
+                        lastResultTitle = "Модальное управление (K)"
                         lastResultMatrix = kMat
                         lastResultGrid = null
-                        resultScalarText = "Матрица коэффициентов обратной связи K (закон u = −Kx):"
+                        resultScalarText = buildString {
+                            if (r < aForDesign.size) {
+                                appendLine("Разложение Калмана: rank(W_c) = $r < ${aForDesign.size}")
+                                appendLine("Перемещено управляемых мод: $r")
+                                appendLine(if (isStabilized) "✅ Система СТАБИЛИЗИРУЕМА и стабилизирована!" else "⚠️ Неуправляемое подпространство содержит неустойчивые моды!")
+                                appendLine()
+                            }
+                            appendLine("Спектр замкнутой системы A − BK:")
+                            newSpectrum.forEachIndexed { idx, c -> appendLine("μ${toSubscript((idx + 1).toString())} = $c") }
+                            appendLine()
+                            append("Матрица обратной связи K (u = −Kx):")
+                        }
                         isError = false
                         onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))
                         showPolesDialog = false
@@ -1413,107 +1503,141 @@ fun SquareMatricesScreen(
             text = {
                 Column(modifier = Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState())) {
                     Text(
-                        "A — динамика, B — входы, Q — штраф за состояние (Q ≥ 0), R — штраф за управление (R > 0).",
+                        "Матрица B может иметь любую размерность n×m (от 1 столбца до n×n). Данные синхронизируются с главным экраном.",
                         color = TextDim,
-                        fontSize = 12.sp
+                        fontSize = 11.5.sp
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Состояния n", color = TextWhite, fontSize = 12.sp)
-                        Box(
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(
                             modifier = Modifier
-                                .width(54.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, AccentCyan, RoundedCornerShape(8.dp))
-                                .padding(8.dp)
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF0B1322))
+                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            BasicTextField(
-                                value = lqrNInput,
-                                onValueChange = { v ->
-                                    if (v.isEmpty() || v.all { it.isDigit() }) {
-                                        lqrNInput = v
-                                        v.toIntOrNull()?.takeIf { it in 2..7 }?.let { n ->
-                                            if (n != lqrN) {
-                                                lqrN = n
-                                                lqrAInput = resizeMatrix(lqrAInput, n, n)
-                                                lqrBInput = resizeMatrix(lqrBInput, n, lqrM)
-                                                lqrQInput = resizeIdentityMatrix(lqrQInput, n)
-                                            }
-                                        }
+                            Text("Состояния (n)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CounterButton("−", lqrN > 2) {
+                                    if (lqrN > 2) {
+                                        lqrN--; lqrNInput = lqrN.toString()
+                                        lqrAInput = resizeMatrix(lqrAInput, lqrN, lqrN)
+                                        lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
+                                        lqrQInput = resizeIdentityMatrix(lqrQInput, lqrN)
+                                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                                     }
-                                },
-                                textStyle = TextStyle(color = TextWhite, fontSize = 14.sp),
-                                cursorBrush = SolidColor(AccentCyan),
-                                singleLine = true
-                            )
-                        }
-                        Text("Входы m", color = TextWhite, fontSize = 12.sp)
-                        Box(
-                            modifier = Modifier
-                                .width(54.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF0F172A))
-                                .border(1.dp, AccentPurple, RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            BasicTextField(
-                                value = lqrMInput,
-                                onValueChange = { v ->
-                                    if (v.isEmpty() || v.all { it.isDigit() }) {
-                                        lqrMInput = v
-                                        v.toIntOrNull()?.takeIf { it in 1..4 }?.let { m ->
-                                            if (m != lqrM) {
-                                                lqrM = m
-                                                lqrBInput = resizeMatrix(lqrBInput, lqrN, m)
-                                                lqrRInput = resizeIdentityMatrix(lqrRInput, m)
-                                            }
-                                        }
+                                }
+                                Text(
+                                    "$lqrN",
+                                    color = AccentCyan,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                CounterButton("+", lqrN < 7) {
+                                    if (lqrN < 7) {
+                                        lqrN++; lqrNInput = lqrN.toString()
+                                        lqrAInput = resizeMatrix(lqrAInput, lqrN, lqrN)
+                                        lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
+                                        lqrQInput = resizeIdentityMatrix(lqrQInput, lqrN)
+                                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                                     }
-                                },
-                                textStyle = TextStyle(color = TextWhite, fontSize = 14.sp),
-                                cursorBrush = SolidColor(AccentPurple),
-                                singleLine = true
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            runCatching {
-                                val a0 = parse(matrixA)
-                                val b0 = parse(matrixB)
-                                val q0 = parse(matrixC)
-                                lqrN = a0.size; lqrNInput = lqrN.toString()
-                                lqrM = b0.first().size.coerceIn(1, 4); lqrMInput = lqrM.toString()
-                                lqrAInput = matrixA
-                                lqrBInput = resizeMatrix(matrixB, lqrN, lqrM)
-                                lqrQInput = if (q0.all { row -> row.all { it == 0.0 } }) identityStringGrid(lqrN) else matrixC
-                                lqrRInput = identityStringGrid(lqrM)
-                            }.onFailure {
-                                Toast.makeText(context, it.message ?: "Не удалось загрузить A, B, C", Toast.LENGTH_LONG).show()
+                                }
                             }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF0B1322))
+                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Столбцов B (m)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CounterButton("−", lqrM > 1) {
+                                    if (lqrM > 1) {
+                                        lqrM--; lqrMInput = lqrM.toString()
+                                        lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
+                                        lqrRInput = resizeIdentityMatrix(lqrRInput, lqrM)
+                                    }
+                                }
+                                Text(
+                                    "$lqrM",
+                                    color = AccentPurple,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                CounterButton("+", lqrM < 7) {
+                                    if (lqrM < 7) {
+                                        lqrM++; lqrMInput = lqrM.toString()
+                                        lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
+                                        lqrRInput = resizeIdentityMatrix(lqrRInput, lqrM)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            lqrN = size; lqrNInput = lqrN.toString()
+                            lqrM = size; lqrMInput = lqrM.toString()
+                            lqrAInput = resizeMatrix(matrixA, lqrN, lqrN)
+                            lqrBInput = resizeMatrix(matrixB, lqrN, lqrM)
+                            val parsedC = runCatching { parse(matrixC) }.getOrNull()
+                            val isZeroC = parsedC == null || parsedC.all { row -> row.all { abs(it) < 1e-12 } }
+                            lqrQInput = if (isZeroC) identityStringGrid(lqrN) else resizeMatrix(matrixC, lqrN, lqrN)
+                            lqrRInput = identityStringGrid(lqrM)
                         },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Загрузить A, B, C с основного экрана", fontSize = 12.sp) }
-                    Spacer(modifier = Modifier.height(8.dp))
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF192841)),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.6f)),
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            "📥 Взять полные A, B (${size}×$size), C с экрана",
+                            color = AccentCyan,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text("A (${lqrN}×${lqrN})", color = AccentCyan, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(lqrN, lqrN, lqrAInput, AccentCyan, 40.dp, 11.sp) { r, c, v ->
+                    MatrixGridInput(lqrN, lqrN, lqrAInput, AccentCyan, 42.dp, 12.sp) { r, c, v ->
                         lqrAInput = lqrAInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("B (${lqrN}×${lqrM})", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(lqrN, lqrM, lqrBInput, AccentPurple, 40.dp, 11.sp) { r, c, v ->
+                    Text("B (${lqrN}×${lqrM}) — матрица входов", color = AccentPurple, fontWeight = FontWeight.Bold)
+                    MatrixGridInput(lqrN, lqrM, lqrBInput, AccentPurple, 42.dp, 12.sp) { r, c, v ->
                         lqrBInput = lqrBInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Q (${lqrN}×${lqrN})", color = AccentAmber, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(lqrN, lqrN, lqrQInput, AccentAmber, 40.dp, 11.sp) { r, c, v ->
+                    Text("Q (${lqrN}×${lqrN}, Q ≥ 0)", color = AccentAmber, fontWeight = FontWeight.Bold)
+                    MatrixGridInput(lqrN, lqrN, lqrQInput, AccentAmber, 42.dp, 12.sp) { r, c, v ->
                         lqrQInput = lqrQInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
+                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("R (${lqrM}×${lqrM})", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(lqrM, lqrM, lqrRInput, AccentPurple, 40.dp, 11.sp) { r, c, v ->
+                    Text("R (${lqrM}×${lqrM}, R > 0)", color = AccentPurple, fontWeight = FontWeight.Bold)
+                    MatrixGridInput(lqrM, lqrM, lqrRInput, AccentPurple, 42.dp, 12.sp) { r, c, v ->
                         lqrRInput = lqrRInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
                     }
                 }
@@ -1521,15 +1645,16 @@ fun SquareMatricesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     try {
+                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                         val a = parse(lqrAInput)
                         val b = parse(lqrBInput)
                         val q = parse(lqrQInput)
                         val r = parse(lqrRInput)
                         val (pMat, kMat) = math.solveLQR(a, b, q, r)
                         lastResultTitle = "LQR — Оптимальное управление"
-                        resultScalarText = "Решение уравнения Риккати P:\n" +
+                        resultScalarText = "Решение уравнения Риккати P (${lqrN}×$lqrN):\n" +
                                 formatMatrixAligned(pMat) +
-                                "\n\nМатрица обратной связи K = R⁻¹BᵀP:\n" +
+                                "\n\nМатрица обратной связи K = R⁻¹BᵀP (${lqrM}×$lqrN):\n" +
                                 formatMatrixAligned(kMat) +
                                 "\n\nЗакон управления: u = −Kx"
                         lastResultGrid = null; lastResultMatrix = kMat; isError = false
@@ -1955,8 +2080,8 @@ fun RectangularMatricesScreen(
                 resultScalarText = ""
                 isError = false
             },
-            onTransferToA = { mat -> onSizeAChange(mat.size, mat[0].size); onMatrixAChange(matrixToPreciseStringList(mat)) },
-            onTransferToB = { mat -> onSizeBChange(mat.size, mat[0].size); onMatrixBChange(matrixToPreciseStringList(mat)) },
+            onTransferToA = { mat: Array<DoubleArray> -> onSizeAChange(mat.size, mat[0].size); onMatrixAChange(matrixToPreciseStringList(mat)) },
+            onTransferToB = { mat: Array<DoubleArray> -> onSizeBChange(mat.size, mat[0].size); onMatrixBChange(matrixToPreciseStringList(mat)) },
             onTransferToC = null
         )
     }
@@ -2069,17 +2194,22 @@ fun HistoryBottomSheetContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text("История вычислений", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("Всего записей: ${historyList.size} (сохраняется автоматически)", color = TextDim, fontSize = 12.sp)
+                Text("Всего записей: ${historyList.size}", color = TextDim, fontSize = 12.sp)
             }
             if (historyList.isNotEmpty()) {
-                FilledTonalButton(
-                    onClick = onClearHistory,
-                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF450A0A)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) { Text("Очистить", color = Color(0xFFFCA5A5), fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF2D1622))
+                        .border(1.dp, Color(0xFFF87171).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .clickable { onClearHistory() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🗑️", fontSize = 16.sp)
+                }
             }
         }
         Spacer(modifier = Modifier.height(14.dp))
@@ -2360,7 +2490,7 @@ fun MatrixGridInput(
                             BasicTextField(
                                 value = cellVal,
                                 onValueChange = { input: String ->
-                                    if (input.isEmpty() || input.matches(Regex("^-?\\d*(\\.\\d*)?$"))) {
+                                    if (input.isEmpty() || input.matches(Regex("^-?\\d*([./]\\d*)?$")) || input == "e" || input == "-e") {
                                         onValueChange(i, j, input)
                                     }
                                 },
@@ -2405,8 +2535,12 @@ fun ResultCardBlock(
     onTransferToC: ((Array<DoubleArray>) -> Unit)? = null
 ) {
     val hasResult = lastResultMatrix != null || lastResultGrid != null || resultScalarText.isNotEmpty()
-    // Не дублируем матрицу зеленой сеткой снизу, если в тексте уже отрисована таблица со скобками ⎡ ⎢ ⎣
+    var symbolicMode by remember { mutableStateOf(false) }
     val alreadyHasFormattedMatrixInText = resultScalarText.contains("⎡") || resultScalarText.contains("⎣")
+
+    val displayedScalarText = remember(resultScalarText, symbolicMode) {
+        prettifyMathText(resultScalarText)
+    }
 
     AnimatedVisibility(visible = hasResult, enter = fadeIn() + slideInVertically()) {
         Card(
@@ -2424,7 +2558,7 @@ fun ResultCardBlock(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isError) "⚠️ Ошибка" else "✅ $title",
+                        text = if (isError) "⚠️ Ошибка" else "✅ ${prettifyMathText(title)}",
                         color = if (isError) Color(0xFFFCA5A5) else AccentEmerald,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
@@ -2432,32 +2566,53 @@ fun ResultCardBlock(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (lastResultMatrix != null && !isError && !alreadyHasFormattedMatrixInText) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(if (symbolicMode) AccentCyan.copy(alpha = 0.22f) else Color(0xFF1E293B))
+                                    .border(
+                                        1.dp,
+                                        if (symbolicMode) AccentCyan else Color(0xFF334155),
+                                        RoundedCornerShape(7.dp)
+                                    )
+                                    .clickable { symbolicMode = !symbolicMode }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = if (symbolicMode) "Дроби: ВКЛ" else "a/b · eⁿ",
+                                    color = if (symbolicMode) AccentCyan else TextWhite,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(7.dp))
                                 .background(Color(0xFF1E293B))
                                 .clickable {
                                     val txt = when {
-                                        lastResultGrid != null -> resultScalarText + "\n" + lastResultGrid.joinToString("\n") { it.joinToString("\t") }
-                                        resultScalarText.isNotEmpty() && alreadyHasFormattedMatrixInText -> resultScalarText
-                                        lastResultMatrix != null -> formatMatrixRaw(lastResultMatrix)
-                                        else -> resultScalarText
+                                        lastResultGrid != null -> displayedScalarText + "\n" + lastResultGrid.joinToString("\n") { it.joinToString("\t") }
+                                        displayedScalarText.isNotEmpty() && alreadyHasFormattedMatrixInText -> displayedScalarText
+                                        lastResultMatrix != null -> formatMatrixRaw(lastResultMatrix, symbolicMode)
+                                        else -> displayedScalarText
                                     }
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     clipboard.setPrimaryClip(ClipData.newPlainText("Matrix Result", txt))
                                     Toast.makeText(context, "Скопировано!", Toast.LENGTH_SHORT).show()
                                 }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
-                            Text("📋 Копировать", color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            Text("📋 Копировать", color = TextWhite, fontSize = 11.sp)
                         }
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(RoundedCornerShape(7.dp))
                                 .background(Color(0xFF281A24))
                                 .clickable { onClearResult() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text("✕", color = Color(0xFFFCA5A5), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -2466,9 +2621,9 @@ fun ResultCardBlock(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (resultScalarText.isNotEmpty()) {
+                if (displayedScalarText.isNotEmpty()) {
                     Text(
-                        resultScalarText,
+                        displayedScalarText,
                         color = TextWhite,
                         fontSize = 13.5.sp,
                         fontFamily = FontFamily.Monospace,
@@ -2480,7 +2635,7 @@ fun ResultCardBlock(
                 if (lastResultGrid != null) {
                     FormattedTableGrid(lastResultGrid)
                 } else if (lastResultMatrix != null && !alreadyHasFormattedMatrixInText) {
-                    MatrixResultGridAdaptive(lastResultMatrix, screenWidth)
+                    MatrixResultGridAdaptive(lastResultMatrix, screenWidth, symbolicMode, isExpMode = title.contains("Экспонента"))
                 }
 
                 if (lastResultMatrix != null && !isError) {
@@ -2527,10 +2682,29 @@ fun ResultCardBlock(
     }
 }
 
+data class SymbolicToken(
+    val sign: String = "",
+    val whole: String = "",
+    val num: String = "",
+    val den: String = "",
+    val suffix: String = "",
+    val plainText: String = ""
+) {
+    val isFraction: Boolean get() = num.isNotEmpty() && den.isNotEmpty()
+}
+
 @Composable
-fun MatrixResultGridAdaptive(matrix: Array<DoubleArray>, screenWidth: Dp) {
+fun MatrixResultGridAdaptive(
+    matrix: Array<DoubleArray>,
+    screenWidth: Dp,
+    symbolicMode: Boolean = false,
+    isExpMode: Boolean = false
+) {
     val rows = matrix.size; if (rows == 0) return; val cols = matrix[0].size; if (cols == 0) return
-    val colWidth = ((screenWidth - 60.dp) / cols).coerceIn(48.dp, 78.dp)
+
+    val cellWidth = ((screenWidth - 68.dp) / cols).coerceIn(78.dp, 112.dp)
+    val cellHeight = if (symbolicMode) 48.dp else 38.dp
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2539,54 +2713,331 @@ fun MatrixResultGridAdaptive(matrix: Array<DoubleArray>, screenWidth: Dp) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.height((rows * 28).dp).width(3.dp).background(AccentEmerald, RoundedCornerShape(topStart = 3.dp, bottomStart = 3.dp)))
+        Box(
+            modifier = Modifier
+                .height((rows * (cellHeight.value + 5f)).dp)
+                .width(3.5.dp)
+                .background(AccentEmerald, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+        )
         Spacer(modifier = Modifier.width(6.dp))
-        Column {
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             for (i in 0 until rows) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                     for (j in 0 until cols) {
+                        val value = matrix[i][j]
                         Box(
-                            modifier = Modifier.width(colWidth).height(28.dp).padding(horizontal = 2.dp),
+                            modifier = Modifier
+                                .width(cellWidth)
+                                .height(cellHeight)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0B1322))
+                                .border(
+                                    1.dp,
+                                    if (symbolicMode) AccentCyan.copy(alpha = 0.3f) else Color(0xFF1F2E47),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                formatNumber(matrix[i][j]),
-                                color = TextWhite,
-                                fontSize = if (colWidth < 52.dp) 11.sp else 13.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            if (!symbolicMode) {
+                                val txt = formatNumber(value)
+                                Text(
+                                    text = txt,
+                                    color = TextWhite,
+                                    fontSize = if (txt.length > 8) 11.sp else 13.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            } else {
+                                val token = toSymbolicToken(value, isExpMode)
+                                PrettySymbolicTokenCell(token)
+                            }
                         }
                     }
                 }
             }
         }
         Spacer(modifier = Modifier.width(6.dp))
-        Box(modifier = Modifier.height((rows * 28).dp).width(3.dp).background(AccentEmerald, RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp)))
+        Box(
+            modifier = Modifier
+                .height((rows * (cellHeight.value + 5f)).dp)
+                .width(3.5.dp)
+                .background(AccentEmerald, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+        )
+    }
+}
+
+@Composable
+fun PrettySymbolicTokenCell(token: SymbolicToken) {
+    if (!token.isFraction) {
+        val isSpecial = token.plainText.contains("e") || token.plainText.contains("√")
+        Text(
+            text = token.plainText,
+            color = if (isSpecial) AccentCyan else TextWhite,
+            fontSize = if (token.plainText.length > 8) 11.sp else 13.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        return
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        if (token.sign.isNotEmpty() || token.whole.isNotEmpty()) {
+            Text(
+                text = token.sign + token.whole,
+                color = TextWhite,
+                fontSize = 12.5.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(end = 2.dp)
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = token.num,
+                color = AccentCyan,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.ExtraBold,
+                lineHeight = 10.sp,
+                maxLines = 1,
+                softWrap = false
+            )
+            Box(
+                modifier = Modifier
+                    .width((maxOf(token.num.length, token.den.length) * 6 + 6).dp)
+                    .height(1.2.dp)
+                    .background(AccentCyan)
+            )
+            Text(
+                text = token.den,
+                color = AccentCyan,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.ExtraBold,
+                lineHeight = 10.sp,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+        if (token.suffix.isNotEmpty()) {
+            Text(
+                text = token.suffix,
+                color = AccentAmber,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(start = 2.dp)
+            )
+        }
+    }
+}
+
+fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
+    if (!value.isFinite()) return SymbolicToken(plainText = value.toString())
+    if (abs(value) < 1e-9) return SymbolicToken(plainText = "0")
+
+    val nearestInt = kotlin.math.round(value)
+    if (abs(value - nearestInt) < 1e-6 && abs(nearestInt) < 1e9) {
+        return SymbolicToken(plainText = nearestInt.toLong().toString())
+    }
+
+    fun gcd(a0: Long, b0: Long): Long {
+        var a = abs(a0); var b = abs(b0)
+        while (b != 0L) { val t = a % b; a = b; b = t }
+        return if (a == 0L) 1L else a
+    }
+
+    fun findExactFraction(x: Double, maxQ: Long = 9999L, tol: Double = 1e-6): Pair<Long, Long>? {
+        val ax = abs(x)
+        if (ax < 1e-7 || ax > 1e7) return null
+        var h1 = 1L; var h2 = 0L
+        var k1 = 0L; var k2 = 1L
+        var b = ax
+        for (step in 0 until 18) {
+            val a = kotlin.math.floor(b).toLong()
+            val h = a * h1 + h2
+            val k = a * k1 + k2
+            if (k > maxQ) break
+            h2 = h1; h1 = h
+            k2 = k1; k1 = k
+            val rem = b - a
+            if (rem < 1e-11) break
+            b = 1.0 / rem
+        }
+        if (k1 <= 1L || h1 == 0L) return null
+        val relErr = abs(ax - h1.toDouble() / k1.toDouble()) / maxOf(1.0, ax)
+        return if (relErr <= tol) Pair(h1, k1) else null
+    }
+
+    val signStr = if (value < 0) "−" else ""
+    val absVal = abs(value)
+
+    // 1. Простые точные дроби со знаменателем до 16 (1/2, 1/3, 1/4 и т.д.)
+    findExactFraction(absVal, maxQ = 16L, tol = 1e-6)?.let { (p, q) ->
+        return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
+    }
+
+    // 2. Формулы с экспонентой e^k ИЩЕМ ТОЛЬКО тогда, когда нажата кнопка "Экспонента e^A"!
+    // Чтобы в LQR или A^-1 никогда случайно не появлялась буква e!
+    if (isExpMode) {
+        val powers = (1..25).toList() + (-1 downTo -15).toList()
+        for (k in powers) {
+            val ePow = kotlin.math.exp(k.toDouble())
+            val eStr = if (k == 1) "e" else "e${toSuperscript(k.toString())}"
+
+            for (q in 1L..16L) {
+                val scaled = value * q.toDouble()
+                for (a in -16L..16L) {
+                    if (a == 0L) continue
+                    val b = kotlin.math.round(scaled - a.toDouble() * ePow).toLong()
+                    if (abs(b) > 16L) continue
+                    val approx = (a.toDouble() * ePow + b.toDouble()) / q.toDouble()
+                    val relErr = abs(value - approx) / maxOf(1.0, abs(value))
+                    if (relErr <= 1e-4) {
+                        val g = gcd(gcd(a, b), q)
+                        val a1 = a / g; val b1 = b / g; val q1 = q / g
+                        val aTerm = when (a1) {
+                            1L -> eStr
+                            -1L -> "−$eStr"
+                            else -> "$a1$eStr"
+                        }
+                        val expr = when {
+                            b1 == 0L -> aTerm
+                            b1 > 0L -> "$aTerm+$b1"
+                            else -> "$aTerm−${abs(b1)}"
+                        }
+                        return if (q1 == 1L) {
+                            SymbolicToken(plainText = expr)
+                        } else if (b1 == 0L) {
+                            val s = if (a1 < 0) "−" else ""
+                            SymbolicToken(sign = s, num = abs(a1).toString(), den = q1.toString(), suffix = eStr)
+                        } else {
+                            SymbolicToken(num = expr, den = q1.toString())
+                        }
+                    }
+                }
+            }
+        }
+
+        // Комбинации двух разных степеней e: (a * e^k1 + b * e^k2) / q
+        val smallPowers = listOf(1, 2, 3, 4, 5, 6, 7, 8, -1, -2, -3)
+        for (i in smallPowers.indices) {
+            for (j in i + 1 until smallPowers.size) {
+                val k1 = smallPowers[i]; val k2 = smallPowers[j]
+                val e1 = kotlin.math.exp(k1.toDouble()); val e2 = kotlin.math.exp(k2.toDouble())
+                val s1 = if (k1 == 1) "e" else "e${toSuperscript(k1.toString())}"
+                val s2 = if (k2 == 1) "e" else "e${toSuperscript(k2.toString())}"
+                for (q in 1L..6L) {
+                    val scaled = value * q.toDouble()
+                    for (a in -6L..6L) {
+                        if (a == 0L) continue
+                        val b = kotlin.math.round((scaled - a.toDouble() * e1) / e2).toLong()
+                        if (b == 0L || abs(b) > 6L) continue
+                        val approx = (a.toDouble() * e1 + b.toDouble() * e2) / q.toDouble()
+                        if (abs(value - approx) / maxOf(1.0, abs(value)) <= 1e-4) {
+                            val g = gcd(gcd(a, b), q)
+                            val a1 = a / g; val b1 = b / g; val q1 = q / g
+                            val t1 = when (a1) { 1L -> s1; -1L -> "−$s1"; else -> "$a1$s1" }
+                            val t2 = when { b1 == 1L -> "+$s2"; b1 == -1L -> "−$s2"; b1 > 0 -> "+$b1$s2"; else -> "−${abs(b1)}$s2" }
+                            val expr = "$t1$t2"
+                            return if (q1 == 1L) SymbolicToken(plainText = expr)
+                            else SymbolicToken(num = expr, den = q1.toString())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Корни и квадратичные иррациональности вида (a * √d + b) / q (например: √3, 1+√2, (1+√5)/2)
+    for (rad in listOf(2, 3, 5, 6, 7)) {
+        val rVal = kotlin.math.sqrt(rad.toDouble())
+        val rStr = "√$rad"
+        for (q in 1L..12L) {
+            val scaled = value * q.toDouble()
+            for (a in -12L..12L) {
+                if (a == 0L) continue
+                val b = kotlin.math.round(scaled - a.toDouble() * rVal).toLong()
+                if (abs(b) > 12L) continue
+                val approx = (a.toDouble() * rVal + b.toDouble()) / q.toDouble()
+                if (abs(value - approx) / maxOf(1.0, abs(value)) <= 1e-6) {
+                    val g = gcd(gcd(a, b), q)
+                    val a1 = a / g; val b1 = b / g; val q1 = q / g
+                    val aTerm = when (a1) {
+                        1L -> rStr
+                        -1L -> "−$rStr"
+                        else -> "$a1$rStr"
+                    }
+                    val expr = when {
+                        b1 == 0L -> aTerm
+                        b1 > 0L -> "$b1+$aTerm".replace("+-", "−").replace("+−", "−")
+                        else -> "${b1}+$aTerm".replace("+-", "−").replace("+−", "−")
+                    }
+                    return if (q1 == 1L) {
+                        SymbolicToken(plainText = expr)
+                    } else if (b1 == 0L) {
+                        val s = if (a1 < 0) "−" else ""
+                        SymbolicToken(sign = s, num = abs(a1).toString(), den = q1.toString(), suffix = rStr)
+                    } else {
+                        SymbolicToken(num = expr, den = q1.toString())
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Все остальные рациональные дроби со знаменателем до 9999
+    findExactFraction(absVal, maxQ = 9999L, tol = 1e-3)?.let { (p, q) ->
+        return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
+    }
+
+    return SymbolicToken(plainText = formatNumber(value))
+}
+
+fun formatSymbolic(value: Double): String {
+    val t = toSymbolicToken(value)
+    return if (!t.isFraction) {
+        t.plainText
+    } else {
+        val w = if (t.whole.isNotEmpty()) "${t.whole} " else ""
+        val sfx = if (t.suffix.isNotEmpty()) "·${t.suffix}" else ""
+        "${t.sign}$w${t.num}/${t.den}$sfx"
     }
 }
 
 @Composable
 fun AdaptiveBtn(text: String, modifier: Modifier = Modifier, colorType: Int = 0, onClick: () -> Unit) {
     val haptic = LocalHapticFeedback.current
+    val prettyLabel = remember(text) { prettifyMathText(text) }
 
     val bgColor = when (colorType) {
-        1 -> Color(0xFF192841)
         2 -> Color(0xFF1F1B44)
-        else -> CardElevated
+        else -> Color(0xFF192841)
     }
     val borderColor = when (colorType) {
-        1 -> AccentCyan.copy(alpha = 0.55f)
-        2 -> AccentPurple.copy(alpha = 0.55f)
-        else -> Color(0xFF283956)
+        2 -> AccentPurple.copy(alpha = 0.6f)
+        else -> AccentCyan.copy(alpha = 0.6f)
     }
     val txtColor = when (colorType) {
-        1 -> AccentCyan
         2 -> Color(0xFFD2C4FF)
-        else -> TextWhite
+        else -> AccentCyan
     }
 
     Button(
@@ -2601,9 +3052,9 @@ fun AdaptiveBtn(text: String, modifier: Modifier = Modifier, colorType: Int = 0,
         border = BorderStroke(1.dp, borderColor)
     ) {
         Text(
-            text,
+            prettyLabel,
             color = txtColor,
-            fontSize = 11.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -2611,7 +3062,37 @@ fun AdaptiveBtn(text: String, modifier: Modifier = Modifier, colorType: Int = 0,
     }
 }
 
-/** Единичная матрица в строковом представлении для UI. */
+fun toSuperscript(exp: String): String {
+    val map = mapOf(
+        '0' to '⁰', '1' to '¹', '2' to '²', '3' to '³', '4' to '⁴',
+        '5' to '⁵', '6' to '⁶', '7' to '⁷', '8' to '⁸', '9' to '⁹',
+        '+' to '⁺', '-' to '⁻', '−' to '⁻', '(' to '⁽', ')' to '⁾',
+        'n' to 'ⁿ', 'k' to 'ᵏ', 'i' to 'ⁱ', 'A' to 'ᴬ', 'B' to 'ᴮ', 'C' to 'ᶜ', 'T' to 'ᵀ'
+    )
+    return exp.map { map[it] ?: it }.joinToString("")
+}
+
+fun toSubscript(sub: String): String {
+    val map = mapOf(
+        '0' to '₀', '1' to '₁', '2' to '₂', '3' to '₃', '4' to '₄',
+        '5' to '₅', '6' to '₆', '7' to '₇', '8' to '₈', '9' to '₉',
+        '+' to '₊', '-' to '₋', 'i' to 'ᵢ', 'c' to '꜀', 'o' to 'ₒ'
+    )
+    return sub.map { map[it] ?: it }.joinToString("")
+}
+
+fun prettifyMathText(input: String): String {
+    if (input.isEmpty()) return input
+    var s = input
+    s = Regex("\\^\\(?([+-]?[0-9a-zA-Z]+)\\)?").replace(s) { m ->
+        toSuperscript(m.groupValues[1])
+    }
+    s = Regex("([λvμ])_([0-9i]+)").replace(s) { m ->
+        m.groupValues[1] + toSubscript(m.groupValues[2])
+    }
+    return s
+}
+
 fun identityStringGrid(n: Int): List<List<String>> =
     List(n) { r -> List(n) { c -> if (r == c) "1" else "0" } }
 
@@ -2622,7 +3103,6 @@ fun resizeIdentityMatrix(old: List<List<String>>, newN: Int): List<List<String>>
         }
     }
 
-/** Faddeev–LeVerrier: p(λ)=λ^n+c1*λ^(n-1)+...+cn. */
 fun characteristicPolynomialCoefficients(matrix: Array<DoubleArray>): List<Double> {
     val n = matrix.size
     require(n > 0 && matrix.all { it.size == n }) { "Для характеристического многочлена нужна квадратная матрица" }
@@ -2647,17 +3127,17 @@ fun characteristicPolynomialCoefficients(matrix: Array<DoubleArray>): List<Doubl
 fun formatCharacteristicPolynomial(coefficients: List<Double>): String {
     val n = coefficients.size
     val terms = mutableListOf<String>()
-    terms += "λ^$n"
+    terms += "λ${toSuperscript(n.toString())}"
     coefficients.forEachIndexed { index, raw ->
         val power = n - index - 1
         val value = if (abs(raw) < 1e-10) 0.0 else raw
         if (value != 0.0) {
             val absVal = abs(value)
-            val magnitude = formatNumber(absVal)
+            val magnitude = formatSymbolic(absVal)
             val variable = when (power) {
                 0 -> ""
                 1 -> "λ"
-                else -> "λ^$power"
+                else -> "λ${toSuperscript(power.toString())}"
             }
             val sign = if (terms.isEmpty()) {
                 if (value < 0) "−" else ""
@@ -2684,7 +3164,7 @@ fun parsePastedText(text: String, reqRows: Int, reqCols: Int): List<List<String>
             .replace("]", " ")
             .trim()
         val rawLines = normalized.lines().filter { it.isNotBlank() }
-        val numberRegex = Regex("[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?")
+        val numberRegex = Regex("[+-]?(?:\\d+(?:/\\d+|\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?")
         val result = mutableListOf<List<String>>()
         if (rawLines.size >= reqRows) {
             for (i in 0 until reqRows) {
@@ -2720,6 +3200,35 @@ fun resizeMatrix(old: List<List<String>>, newR: Int, newC: Int): List<List<Strin
     }
 }
 
+fun parseSmartCell(rawInput: String): Double? {
+    val s = rawInput.trim()
+        .replace('−', '-')
+        .replace(',', '.')
+        .replace(" ", "")
+    if (s.isEmpty() || s == "-") return 0.0
+    s.toDoubleOrNull()?.let { return it }
+
+    if (s.contains("/")) {
+        val parts = s.split("/")
+        if (parts.size == 2) {
+            val num = parseSmartCell(parts[0]) ?: return null
+            val den = parseSmartCell(parts[1]) ?: return null
+            if (abs(den) > 1e-15) return num / den
+        }
+    }
+    if (s == "e") return Math.E
+    if (s == "-e") return -Math.E
+    if (s.startsWith("e^")) {
+        val exp = s.removePrefix("e^").toDoubleOrNull() ?: return null
+        return kotlin.math.exp(exp)
+    }
+    if (s.startsWith("√")) {
+        val rad = s.removePrefix("√").toDoubleOrNull() ?: return null
+        return if (rad >= 0) kotlin.math.sqrt(rad) else null
+    }
+    return null
+}
+
 fun parse(data: List<List<String>>): Array<DoubleArray> {
     require(data.isNotEmpty()) { "Матрица не должна быть пустой" }
     val cols = data[0].size
@@ -2727,8 +3236,7 @@ fun parse(data: List<List<String>>): Array<DoubleArray> {
 
     return Array(data.size) { i ->
         DoubleArray(cols) { j ->
-            val raw = data[i][j].trim()
-            val value = if (raw.isEmpty() || raw == "-") 0.0 else raw.toDoubleOrNull()
+            val value = parseSmartCell(data[i][j])
             require(value != null && value.isFinite()) {
                 "Некорректное число в строке ${i + 1}, столбце ${j + 1}"
             }
@@ -2759,14 +3267,15 @@ private fun formatFiniteNumber(value: Double, decimals: Int): String {
 fun matrixToPreciseStringList(matrix: Array<DoubleArray>): List<List<String>> =
     matrix.map { row -> row.map { formatPreciseNumber(it) } }
 
-fun formatMatrixRaw(matrix: Array<DoubleArray>): String {
-    return matrix.joinToString("\n") { row -> row.joinToString("\t") { v -> formatNumber(v) } }
+fun formatMatrixRaw(matrix: Array<DoubleArray>, symbolic: Boolean = false): String {
+    return matrix.joinToString("\n") { row ->
+        row.joinToString("\t") { v -> if (symbolic) formatSymbolic(v) else formatNumber(v) }
+    }
 }
 
-/** Форматирует матрицу моноширинным текстом: выравнивает значения по столбцам и добавляет скобки. */
-fun formatMatrixAligned(matrix: Array<DoubleArray>): String {
+fun formatMatrixAligned(matrix: Array<DoubleArray>, symbolic: Boolean = false): String {
     if (matrix.isEmpty()) return "[ ]"
-    val formatted = matrix.map { row -> row.map { formatNumber(it) } }
+    val formatted = matrix.map { row -> row.map { if (symbolic) formatSymbolic(it) else formatNumber(it) } }
     val columnCount = formatted.maxOfOrNull { it.size } ?: 0
     if (columnCount == 0) return "[ ]"
     val widths = (0 until columnCount).map { col ->
@@ -2778,18 +3287,20 @@ fun formatMatrixAligned(matrix: Array<DoubleArray>): String {
         }
     }
     return rows.mapIndexed { index, row ->
-        val left = when {
-            rows.size == 1 -> "⎡"
-            index == 0 -> "⎡"
-            index == rows.lastIndex -> "⎣"
-            else -> "⎢"
+        if (rows.size == 1) {
+            "[ $row ]"
+        } else {
+            val left = when (index) {
+                0 -> "⎡"
+                rows.lastIndex -> "⎣"
+                else -> "⎢"
+            }
+            val right = when (index) {
+                0 -> "⎤"
+                rows.lastIndex -> "⎦"
+                else -> "⎥"
+            }
+            "$left $row $right"
         }
-        val right = when {
-            rows.size == 1 -> "⎤"
-            index == 0 -> "⎤"
-            index == rows.lastIndex -> "⎦"
-            else -> "⎥"
-        }
-        "$left $row $right"
     }.joinToString("\n")
 }

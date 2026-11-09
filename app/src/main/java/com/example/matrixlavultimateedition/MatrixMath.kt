@@ -1090,6 +1090,193 @@ class MatrixMath {
         return result.sortedByDescending { it.abs() }
     }
 
+    data class EigenvectorInfo(
+        val index: Int,
+        val lambda: Complex,
+        val isAssociated: Boolean,
+        val chainLevel: Int,
+        val canon: String,
+        val unit: String
+    )
+
+    fun eigenvectorsWithDetails(
+        matrix: Array<DoubleArray>,
+        eigenvalues: List<Complex>
+    ): List<EigenvectorInfo> {
+        val n = matrix.size
+        require(n > 0 && matrix.all { it.size == n }) { "Матрица должна быть непустой и квадратной" }
+        require(matrix.all { row -> row.all { it.isFinite() } }) { "Матрица содержит NaN или Infinity" }
+
+        val scale = max(1.0, matrix.maxOf { row -> row.maxOf { abs(it) } })
+        val zero = Complex(0.0)
+        val usedMultiplicity = mutableMapOf<Int, Int>()
+
+        fun formatBothForms(vec: Array<Complex>): Pair<String, String> {
+            val maxAbs = vec.maxOf { it.abs() }
+            if (maxAbs < 1e-12) return Pair("[ 0 ]ᵀ", "[ 0 ]ᵀ")
+
+            // 1. Нормированный вид (единичная длина L2: ||v||_2 = 1)
+            var l2Norm = 0.0
+            for (v in vec) l2Norm = hypot(l2Norm, v.abs())
+            val normL2 = vec.map { it / (if (l2Norm > 0.0) l2Norm else 1.0) }
+            val l2Str = "[ " + normL2.joinToString(", ") { it.toString() } + " ]ᵀ"
+
+            // 2. Ненормированный (канонический / целочисленный) вид
+            val nonZero = vec.filter { it.abs() > 1e-4 * maxAbs }
+            val smallestRef = nonZero.minByOrNull { it.abs() } ?: Complex(1.0)
+            val candidate = vec.map { it / smallestRef }
+            val allCleanInts = candidate.all {
+                abs(it.re - kotlin.math.round(it.re)) < 1e-3 &&
+                        abs(it.im - kotlin.math.round(it.im)) < 1e-3 &&
+                        it.abs() <= 20.0
+            }
+            val canonVec = if (allCleanInts) {
+                candidate.map {
+                    Complex(
+                        if (abs(it.re) < 1e-5) 0.0 else kotlin.math.round(it.re),
+                        if (abs(it.im) < 1e-5) 0.0 else kotlin.math.round(it.im)
+                    )
+                }
+            } else {
+                val biggestRef = nonZero.maxByOrNull { it.abs() } ?: Complex(1.0)
+                vec.map { it / biggestRef }
+            }
+            val canonStr = "[ " + canonVec.joinToString(", ") { it.toString() } + " ]ᵀ"
+
+            return Pair(canonStr, l2Str)
+        }
+
+        fun nullspaceComplex(mInput: Array<Array<Complex>>): List<Array<Complex>> {
+            val sh = Array(n) { r -> mInput[r].clone() }
+            val pivotColumns = mutableListOf<Int>()
+            var pivotRow = 0
+            val tolerance = 1e-5
+
+            for (col in 0 until n) {
+                if (pivotRow >= n) break
+                var bestRow = pivotRow
+                for (row in pivotRow + 1 until n) {
+                    if (sh[row][col].abs() > sh[bestRow][col].abs()) bestRow = row
+                }
+                if (sh[bestRow][col].abs() <= tolerance) continue
+
+                val temp = sh[pivotRow]; sh[pivotRow] = sh[bestRow]; sh[bestRow] = temp
+                val pivot = sh[pivotRow][col]
+                for (j in col until n) sh[pivotRow][j] = sh[pivotRow][j] / pivot
+                for (row in 0 until n) {
+                    if (row == pivotRow) continue
+                    val factor = sh[row][col]
+                    if (factor.abs() > 0.0) {
+                        for (j in col until n) sh[row][j] = sh[row][j] - factor * sh[pivotRow][j]
+                    }
+                }
+                pivotColumns.add(col)
+                pivotRow++
+            }
+
+            if (pivotColumns.size == n) pivotColumns.removeAt(pivotColumns.lastIndex)
+            val pivotSet = pivotColumns.toSet()
+            val freeColumns = (0 until n).filter { it !in pivotSet }
+
+            return freeColumns.map { chosenFree ->
+                val vector = Array(n) { zero }
+                vector[chosenFree] = Complex(1.0)
+                for (row in pivotColumns.indices) {
+                    val col = pivotColumns[row]
+                    var sum = zero
+                    for (freeCol in freeColumns) sum = sum + sh[row][freeCol] * vector[freeCol]
+                    vector[col] = -sum
+                }
+                vector
+            }
+        }
+
+        fun mulComplex(a: Array<Array<Complex>>, b: Array<Array<Complex>>): Array<Array<Complex>> {
+            return Array(n) { i ->
+                Array(n) { j ->
+                    var s = zero
+                    for (k in 0 until n) s = s + a[i][k] * b[k][j]
+                    s
+                }
+            }
+        }
+
+        // Проверка, является ли новый вектор линейно независимым от уже набранного списка базиса
+        fun isIndependent(existing: List<Array<Complex>>, candidate: Array<Complex>): Boolean {
+            if (existing.isEmpty()) return true
+            val cols = existing.size + 1
+            val realMat = Array(2 * n) { DoubleArray(2 * cols) }
+            for (c in existing.indices) {
+                for (r in 0 until n) {
+                    realMat[r][c] = existing[c][r].re
+                    realMat[r][c + cols] = -existing[c][r].im
+                    realMat[r + n][c] = existing[c][r].im
+                    realMat[r + n][c + cols] = existing[c][r].re
+                }
+            }
+            val lastCol = cols - 1
+            for (r in 0 until n) {
+                realMat[r][lastCol] = candidate[r].re
+                realMat[r][lastCol + cols] = -candidate[r].im
+                realMat[r + n][lastCol] = candidate[r].im
+                realMat[r + n][lastCol + cols] = candidate[r].re
+            }
+            return rankWithTolerance(realMat, 1e-4) / 2 > existing.size
+        }
+
+        return eigenvalues.mapIndexed { eigIdx, lambda ->
+            val clusterRep = (0 until eigIdx).firstOrNull { prev ->
+                (eigenvalues[prev] - lambda).abs() <= 1e-4 * scale
+            } ?: eigIdx
+            val mIdx = usedMultiplicity.getOrDefault(clusterRep, 0)
+            usedMultiplicity[clusterRep] = mIdx + 1
+
+            val nMat = Array(n) { i ->
+                Array(n) { j ->
+                    val v = Complex(matrix[i][j] / scale)
+                    if (i == j) v - Complex(lambda.re / scale, lambda.im / scale) else v
+                }
+            }
+
+            // Накапливаем векторы с сохранением уровня цепочки (1 = собственный, >=2 = присоединенный)
+            val chainVectors = mutableListOf<Pair<Array<Complex>, Int>>()
+            for (vec in nullspaceComplex(nMat)) {
+                if (isIndependent(chainVectors.map { it.first }, vec)) {
+                    chainVectors.add(Pair(vec, 1))
+                }
+            }
+
+            var curPow = nMat
+            var deg = 2
+            while (chainVectors.size <= mIdx && deg <= n) {
+                curPow = mulComplex(curPow, nMat)
+                val extBasis = nullspaceComplex(curPow)
+                for (cand in extBasis) {
+                    if (isIndependent(chainVectors.map { it.first }, cand)) {
+                        chainVectors.add(Pair(cand, deg))
+                        if (chainVectors.size > mIdx) break
+                    }
+                }
+                deg++
+            }
+
+            val chosenPair = chainVectors.getOrNull(mIdx)
+                ?: chainVectors.lastOrNull()
+                ?: Pair(Array(n) { zero }, 1)
+            val targetVec = chosenPair.first
+            val level = chosenPair.second
+            val (canonStr, unitStr) = formatBothForms(targetVec)
+
+            EigenvectorInfo(
+                index = eigIdx + 1,
+                lambda = lambda,
+                isAssociated = level > 1,
+                chainLevel = level,
+                canon = canonStr,
+                unit = unitStr
+            )
+        }
+    }
     fun eigenvectors(
         matrix: Array<DoubleArray>,
         eigenvalues: List<Complex>
@@ -1474,6 +1661,105 @@ class MatrixMath {
         }
     }
 
+    /**
+     * Модальное управление (назначение полюсов).
+     * Поддерживает как полностью управляемые системы (rank(W_c) = n, формула Аккермана),
+     * так и частично управляемые / стабилизируемые системы (1 <= rank(W_c) = r < n)
+     * через каноническое разложение Калмана на управляемое и неуправляемое подпространства.
+     */
+
+    /**
+     * Возвращает для каждого собственного числа из eigenvalues(matA) флаг:
+     * true — мода принадлежит управляемому подпространству (её можно двигать),
+     * false — мода принадлежит неуправляемому подпространству (она фиксирована).
+     */
+
+
+    /**
+     * Строит ортогональное разложение Калмана (x = T * z, где T^-1 = T^T) методом Грама–Шмидта
+     * для частично управляемой системы (1 <= rank(W_c) = r < n).
+     */
+    private fun kalmanOrthogonalDecomposition(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>
+    ): Triple<Int, Array<DoubleArray>, Array<DoubleArray>>? {
+        val n = matA.size
+        val w = controllability(matA, matB)
+        val r = rank(w)
+        if (r <= 0 || r >= n) return null
+
+        val basis = mutableListOf<DoubleArray>()
+        // 1. Ортонормированный базис управляемого подпространства Im(W_c)
+        for (col in 0 until w[0].size) {
+            if (basis.size == r) break
+            val v = DoubleArray(n) { row -> w[row][col] }
+            for (q in basis) {
+                var dot = 0.0
+                for (i in 0 until n) dot += v[i] * q[i]
+                for (i in 0 until n) v[i] -= dot * q[i]
+            }
+            var norm = 0.0
+            for (i in 0 until n) norm = hypot(norm, v[i])
+            if (norm > 1e-9) {
+                basis.add(DoubleArray(n) { i -> v[i] / norm })
+            }
+        }
+        // 2. Дополняем ортонормированным базисом ортогонального дополнения до R^n
+        for (k in 0 until n) {
+            if (basis.size == n) break
+            val v = DoubleArray(n) { row -> if (row == k) 1.0 else 0.0 }
+            for (q in basis) {
+                var dot = 0.0
+                for (i in 0 until n) dot += v[i] * q[i]
+                for (i in 0 until n) v[i] -= dot * q[i]
+            }
+            var norm = 0.0
+            for (i in 0 until n) norm = hypot(norm, v[i])
+            if (norm > 1e-9) {
+                basis.add(DoubleArray(n) { i -> v[i] / norm })
+            }
+        }
+        if (basis.size != n) return null
+        val tMat = Array(n) { row -> DoubleArray(n) { col -> basis[col][row] } }
+        val tInv = transpose(tMat) // T ортогональна => T^(-1) = T^T
+        return Triple(r, tMat, tInv)
+    }
+
+    /**
+     * Возвращает массив флагов для собственных значений из eigenvalues(matA):
+     * true — мода управляема (её можно переместить), false — мода неуправляема (фиксирована).
+     */
+    fun getControllableModeFlags(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>,
+        allEigenvalues: List<Complex> = eigenvalues(matA)
+    ): BooleanArray {
+        val n = matA.size
+        val w = controllability(matA, matB)
+        val r = rank(w)
+        if (r >= n) return BooleanArray(n) { true }
+        if (r <= 0) return BooleanArray(n) { false }
+
+        val decomp = kalmanOrthogonalDecomposition(matA, matB) ?: return BooleanArray(n) { it < r }
+        val (_, tMat, tInv) = decomp
+        val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
+        val aUn = Array(n - r) { i -> DoubleArray(n - r) { j -> aTilde[r + i][r + j] } }
+        val unPoles = eigenvalues(aUn)
+
+        val isControllable = BooleanArray(n) { true }
+        for (uPole in unPoles) {
+            val bestIdx = (0 until n)
+                .filter { isControllable[it] }
+                .minByOrNull { idx ->
+                    hypot(allEigenvalues[idx].re - uPole.re, allEigenvalues[idx].im - uPole.im)
+                }
+            if (bestIdx != null) {
+                isControllable[bestIdx] = false
+            }
+        }
+        return isControllable
+    }
+
     fun ackermann(
         matA: Array<DoubleArray>,
         matB: Array<DoubleArray>,
@@ -1481,69 +1767,74 @@ class MatrixMath {
     ): Array<DoubleArray> {
         val n = matA.size
         require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной" }
-        require(matB.size == n && matB.all { it.size == 1 }) { "Метод Аккермана требует матрицу B размерности n×1" }
-        require(desiredPoles.size == n) { "Количество полюсов должно равняться $n" }
-        require(
-            matA.all { row -> row.all { it.isFinite() } } &&
-                    matB.all { row -> row.all { it.isFinite() } } &&
-                    desiredPoles.all { it.re.isFinite() && it.im.isFinite() }
-        ) {
-            "Матрицы и полюса должны содержать конечные числа"
+        require(matB.size == n && matB.all { it.size == 1 }) { "Матрица B должна иметь размерность n×1" }
+        require(desiredPoles.isNotEmpty() && desiredPoles.size <= n) {
+            "Количество полюсов должно быть от 1 до $n"
         }
 
-        var coefficients = arrayOf(Complex(1.0))
-        for (pole in desiredPoles) {
-            val next = Array(coefficients.size + 1) { Complex(0.0) }
-            for (i in coefficients.indices) {
-                next[i] = next[i] + coefficients[i]
-                next[i + 1] = next[i + 1] - coefficients[i] * pole
-            }
-            coefficients = next
-        }
-
-        val coefficientScale = max(1.0, coefficients.maxOf { it.abs() })
-        require(coefficients.all { abs(it.im) <= 1e-8 * coefficientScale }) {
-            "Для вещественного управления комплексные полюса должны образовывать сопряжённые пары (например, -1+2i и -1-2i)"
-        }
-
-        val realCoefficients = DoubleArray(n + 1) { coefficients[it].re }
         val w = controllability(matA, matB)
-        require(rank(w) == n) { "Система не является полностью управляемой" }
+        val r = rank(w)
+        require(r > 0) { "Матрица B нулевая (rank(W_c) = 0) — управление невозможно." }
 
-        val wInverse = inverse(w) ?: throw ArithmeticException("Не удалось обратить матрицу управляемости")
-
-        var polynomialMatrix = Array(n) { DoubleArray(n) }
-        for (i in 0..n) {
-            val power = matrixPower(matA, n - i) ?: throw ArithmeticException("Ошибка вычисления степени матрицы")
-            val term = multiplyScalar(power, realCoefficients[i])
-            polynomialMatrix = add(polynomialMatrix, term) ?: throw ArithmeticException("Ошибка вычисления матричного многочлена")
-        }
-
-        val lastRow = wInverse[n - 1]
-        val k = Array(1) { DoubleArray(n) }
-        for (j in 0 until n) {
-            var sum = 0.0
-            for (i in 0 until n) sum += lastRow[i] * polynomialMatrix[i][j]
-            k[0][j] = sum
-        }
-
-        require(k[0].all { it.isFinite() }) { "Получен некорректный коэффициент обратной связи" }
-
-        val closedLoop = subtract(matA, multiply(matB, k) ?: throw ArithmeticException("Ошибка проверки замкнутой системы"))
-            ?: throw ArithmeticException("Ошибка проверки замкнутой системы")
-        val actualPoles = eigenvalues(closedLoop).toMutableList()
-        val scale = max(1.0, max(desiredPoles.maxOf { it.abs() }, actualPoles.maxOf { it.abs() }))
-        val tolerance = 1e-3 * scale
-        for (target in desiredPoles) {
-            val index = actualPoles.indices.minByOrNull { i ->
-                hypot(actualPoles[i].re - target.re, actualPoles[i].im - target.im)
-            } ?: throw ArithmeticException("Не удалось проверить назначенные полюса")
-            val error = hypot(actualPoles[index].re - target.re, actualPoles[index].im - target.im)
-            if (error > tolerance) {
-                throw ArithmeticException("Метод Аккермана отклонён: полюс $target не подтверждён (ошибка $error)")
+        fun ackermannFull(ac: Array<DoubleArray>, bc: Array<DoubleArray>, poles: List<Complex>): Array<DoubleArray> {
+            val m = ac.size
+            var coeffs = arrayOf(Complex(1.0))
+            for (pole in poles) {
+                val next = Array(coeffs.size + 1) { Complex(0.0) }
+                for (i in coeffs.indices) {
+                    next[i] = next[i] + coeffs[i]
+                    next[i + 1] = next[i + 1] - coeffs[i] * pole
+                }
+                coeffs = next
             }
-            actualPoles.removeAt(index)
+            val cScale = max(1.0, coeffs.maxOf { it.abs() })
+            require(coeffs.all { abs(it.im) <= 1e-5 * cScale }) {
+                "Комплексные управляемые полюса должны образовывать сопряжённые пары!"
+            }
+            val realCoeffs = DoubleArray(m + 1) { coeffs[it].re }
+            val wc = controllability(ac, bc)
+            val wcInv = inverse(wc) ?: throw ArithmeticException("Не удалось обратить матрицу управляемости подсистемы")
+
+            var polyMat = Array(m) { DoubleArray(m) }
+            for (i in 0..m) {
+                val pwr = matrixPower(ac, m - i) ?: throw ArithmeticException("Ошибка степени матрицы")
+                polyMat = add(polyMat, multiplyScalar(pwr, realCoeffs[i])) ?: throw ArithmeticException("Ошибка полинома")
+            }
+            val lastRow = wcInv[m - 1]
+            val kRow = Array(1) { DoubleArray(m) }
+            for (j in 0 until m) {
+                var sum = 0.0
+                for (i in 0 until m) sum += lastRow[i] * polyMat[i][j]
+                kRow[0][j] = sum
+            }
+            return kRow
         }
-        return k
+
+        if (r == n) {
+            require(desiredPoles.size == n) { "Для полностью управляемой системы укажите $n полюсов" }
+            return ackermannFull(matA, matB, desiredPoles)
+        }
+
+        val decomp = kalmanOrthogonalDecomposition(matA, matB)
+            ?: throw ArithmeticException("Не удалось построить разложение Калмана")
+        val (_, tMat, tInv) = decomp
+
+        val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
+        val bTilde = multiply(tInv, matB)!!
+
+        val ac = Array(r) { i -> DoubleArray(r) { j -> aTilde[i][j] } }
+        val bc = Array(r) { i -> DoubleArray(1) { bTilde[i][0] } }
+
+        val allOpenPoles = eigenvalues(matA)
+        val ctrlFlags = getControllableModeFlags(matA, matB, allOpenPoles)
+        val controllableTargetPoles = if (desiredPoles.size == n) {
+            desiredPoles.filterIndexed { index, _ -> ctrlFlags[index] }
+        } else {
+            desiredPoles.take(r)
+        }
+
+        val kc = ackermannFull(ac, bc, controllableTargetPoles)
+        val kTilde = Array(1) { DoubleArray(n) { j -> if (j < r) kc[0][j] else 0.0 } }
+        return multiply(kTilde, tInv) ?: throw ArithmeticException("Ошибка обратного преобразования K")
     }
 }
