@@ -1107,42 +1107,59 @@ class MatrixMath {
         require(n > 0 && matrix.all { it.size == n }) { "Матрица должна быть непустой и квадратной" }
         require(matrix.all { row -> row.all { it.isFinite() } }) { "Матрица содержит NaN или Infinity" }
 
-        val scale = max(1.0, matrix.maxOf { row -> row.maxOf { abs(it) } })
         val zero = Complex(0.0)
         val usedMultiplicity = mutableMapOf<Int, Int>()
 
-        fun formatBothForms(vec: Array<Complex>): Pair<String, String> {
+        fun prettyNormalizeEigen(vec: Array<Complex>): Array<Complex> {
             val maxAbs = vec.maxOf { it.abs() }
-            if (maxAbs < 1e-12) return Pair("[ 0 ]ᵀ", "[ 0 ]ᵀ")
-
-            // 1. Нормированный вид (единичная длина L2: ||v||_2 = 1)
-            var l2Norm = 0.0
-            for (v in vec) l2Norm = hypot(l2Norm, v.abs())
-            val normL2 = vec.map { it / (if (l2Norm > 0.0) l2Norm else 1.0) }
-            val l2Str = "[ " + normL2.joinToString(", ") { it.toString() } + " ]ᵀ"
-
-            // 2. Ненормированный (канонический / целочисленный) вид
+            if (maxAbs < 1e-12) return vec
             val nonZero = vec.filter { it.abs() > 1e-4 * maxAbs }
-            val smallestRef = nonZero.minByOrNull { it.abs() } ?: Complex(1.0)
-            val candidate = vec.map { it / smallestRef }
+            var smallestRef = nonZero.minByOrNull { it.abs() } ?: Complex(1.0)
+            val firstNZ = vec.firstOrNull { it.abs() > 1e-4 * maxAbs }
+            if (firstNZ != null && smallestRef.re != 0.0 && (firstNZ.re / smallestRef.re) < 0.0) {
+                smallestRef = -smallestRef
+            }
+            val candidate = Array(n) { i -> vec[i] / smallestRef }
             val allCleanInts = candidate.all {
                 abs(it.re - kotlin.math.round(it.re)) < 1e-3 &&
                         abs(it.im - kotlin.math.round(it.im)) < 1e-3 &&
                         it.abs() <= 20.0
             }
-            val canonVec = if (allCleanInts) {
-                candidate.map {
+            return if (allCleanInts) {
+                Array(n) { i ->
                     Complex(
-                        if (abs(it.re) < 1e-5) 0.0 else kotlin.math.round(it.re),
-                        if (abs(it.im) < 1e-5) 0.0 else kotlin.math.round(it.im)
+                        if (abs(candidate[i].re) < 1e-5) 0.0 else kotlin.math.round(candidate[i].re),
+                        if (abs(candidate[i].im) < 1e-5) 0.0 else kotlin.math.round(candidate[i].im)
                     )
                 }
             } else {
                 val biggestRef = nonZero.maxByOrNull { it.abs() } ?: Complex(1.0)
-                vec.map { it / biggestRef }
+                Array(n) { i -> vec[i] / biggestRef }
             }
-            val canonStr = "[ " + canonVec.joinToString(", ") { it.toString() } + " ]ᵀ"
+        }
 
+        fun formatBothForms(vec: Array<Complex>, keepExactSign: Boolean): Pair<String, String> {
+            val maxAbs = vec.maxOf { it.abs() }
+            if (maxAbs < 1e-12) return Pair("[ 0 ]ᵀ", "[ 0 ]ᵀ")
+
+            val canonVec = if (keepExactSign) {
+                Array(n) { i ->
+                    val r = vec[i].re; val im = vec[i].im
+                    Complex(
+                        if (abs(r - kotlin.math.round(r)) < 1e-4) kotlin.math.round(r) else r,
+                        if (abs(im - kotlin.math.round(im)) < 1e-4) kotlin.math.round(im) else im
+                    )
+                }
+            } else {
+                prettyNormalizeEigen(vec)
+            }
+
+            var l2Norm = 0.0
+            for (v in canonVec) l2Norm = hypot(l2Norm, v.abs())
+            val normL2 = canonVec.map { it / (if (l2Norm > 0.0) l2Norm else 1.0) }
+
+            val canonStr = "[ " + canonVec.joinToString(", ") { it.toString() } + " ]ᵀ"
+            val l2Str = "[ " + normL2.joinToString(", ") { it.toString() } + " ]ᵀ"
             return Pair(canonStr, l2Str)
         }
 
@@ -1191,6 +1208,67 @@ class MatrixMath {
             }
         }
 
+        /**
+         * Прямое решение неоднородной системы (A - λI) * h = rhs методом Гаусса–Жордана.
+         * Находит точный присоединенный вектор h для заданного вектора предыдущего уровня rhs!
+         */
+        fun solveAssociatedSystem(nMat: Array<Array<Complex>>, rhs: Array<Complex>): Array<Complex>? {
+            val aug = Array(n) { r ->
+                Array(n + 1) { c -> if (c < n) nMat[r][c] else rhs[r] }
+            }
+            val pivotCols = mutableListOf<Int>()
+            var pivotRow = 0
+            val tol = 1e-5
+
+            for (col in 0 until n) {
+                if (pivotRow >= n) break
+                var bestRow = pivotRow
+                for (row in pivotRow + 1 until n) {
+                    if (aug[row][col].abs() > aug[bestRow][col].abs()) bestRow = row
+                }
+                if (aug[bestRow][col].abs() <= tol) continue
+
+                val tmp = aug[pivotRow]; aug[pivotRow] = aug[bestRow]; aug[bestRow] = tmp
+                val pv = aug[pivotRow][col]
+                for (j in col..n) aug[pivotRow][j] = aug[pivotRow][j] / pv
+                for (row in 0 until n) {
+                    if (row == pivotRow) continue
+                    val f = aug[row][col]
+                    if (f.abs() > 0.0) {
+                        for (j in col..n) aug[row][j] = aug[row][j] - f * aug[pivotRow][j]
+                    }
+                }
+                pivotCols.add(col)
+                pivotRow++
+            }
+
+            // Проверка совместности системы (0 == rhs)
+            for (row in pivotRow until n) {
+                if (aug[row][n].abs() > 1e-4) return null
+            }
+
+            // Базовое частное решение h0 (все свободные переменные = 0)
+            val h0 = Array(n) { zero }
+            for (r in pivotCols.indices) {
+                h0[pivotCols[r]] = aug[r][n]
+            }
+
+            // Также проверяем варианты h0 + c * v_ker (выбираем самый чистый вектор с минимумом минусов и нулей)
+            val kerBasis = nullspaceComplex(nMat)
+            val candidates = mutableListOf(h0)
+            for (kv in kerBasis) {
+                for (c in listOf(1.0, -1.0)) {
+                    candidates.add(Array(n) { i -> h0[i] + kv[i] * c })
+                }
+            }
+
+            return candidates.minWithOrNull(
+                compareBy<Array<Complex>> { vec -> vec.count { it.abs() > 1e-5 } } // Сначала минимум ненулевых элементов
+                    .thenBy { vec -> vec.count { it.re < -1e-5 } }                 // Затем минимум отрицательных чисел (+1 лучше -1)
+                    .thenByDescending { vec -> vec.indexOfFirst { it.abs() > 1e-5 } }        // Затем канонический порядок
+            )
+        }
+
         fun mulComplex(a: Array<Array<Complex>>, b: Array<Array<Complex>>): Array<Array<Complex>> {
             return Array(n) { i ->
                 Array(n) { j ->
@@ -1201,9 +1279,8 @@ class MatrixMath {
             }
         }
 
-        // Проверка, является ли новый вектор линейно независимым от уже набранного списка базиса
         fun isIndependent(existing: List<Array<Complex>>, candidate: Array<Complex>): Boolean {
-            if (existing.isEmpty()) return true
+            if (existing.isEmpty()) return candidate.any { it.abs() > 1e-5 }
             val cols = existing.size + 1
             val realMat = Array(2 * n) { DoubleArray(2 * cols) }
             for (c in existing.indices) {
@@ -1224,40 +1301,53 @@ class MatrixMath {
             return rankWithTolerance(realMat, 1e-4) / 2 > existing.size
         }
 
+        val clusterCache = mutableMapOf<Int, List<Pair<Array<Complex>, Int>>>()
+
         return eigenvalues.mapIndexed { eigIdx, lambda ->
             val clusterRep = (0 until eigIdx).firstOrNull { prev ->
-                (eigenvalues[prev] - lambda).abs() <= 1e-4 * scale
+                (eigenvalues[prev] - lambda).abs() <= 1e-4
             } ?: eigIdx
             val mIdx = usedMultiplicity.getOrDefault(clusterRep, 0)
             usedMultiplicity[clusterRep] = mIdx + 1
 
-            val nMat = Array(n) { i ->
-                Array(n) { j ->
-                    val v = Complex(matrix[i][j] / scale)
-                    if (i == j) v - Complex(lambda.re / scale, lambda.im / scale) else v
-                }
-            }
-
-            // Накапливаем векторы с сохранением уровня цепочки (1 = собственный, >=2 = присоединенный)
-            val chainVectors = mutableListOf<Pair<Array<Complex>, Int>>()
-            for (vec in nullspaceComplex(nMat)) {
-                if (isIndependent(chainVectors.map { it.first }, vec)) {
-                    chainVectors.add(Pair(vec, 1))
-                }
-            }
-
-            var curPow = nMat
-            var deg = 2
-            while (chainVectors.size <= mIdx && deg <= n) {
-                curPow = mulComplex(curPow, nMat)
-                val extBasis = nullspaceComplex(curPow)
-                for (cand in extBasis) {
-                    if (isIndependent(chainVectors.map { it.first }, cand)) {
-                        chainVectors.add(Pair(cand, deg))
-                        if (chainVectors.size > mIdx) break
+            val chainVectors = clusterCache.getOrPut(clusterRep) {
+                val nMat = Array(n) { i ->
+                    Array(n) { j ->
+                        val v = Complex(matrix[i][j])
+                        if (i == j) v - lambda else v
                     }
                 }
-                deg++
+                val list = mutableListOf<Pair<Array<Complex>, Int>>()
+                for (rawVec in nullspaceComplex(nMat)) {
+                    val normVec = prettyNormalizeEigen(rawVec)
+                    if (isIndependent(list.map { it.first }, normVec)) {
+                        list.add(Pair(normVec, 1))
+                    }
+                }
+
+                var curPow = nMat
+                var deg = 2
+                while (list.size < n && deg <= n) {
+                    // 1. Сначала пробуем прямое решение системы (A - λI) * h = v_prev для каждого вектора уровня deg - 1
+                    val prevVectors = list.filter { it.second == deg - 1 }
+                    for ((pv, _) in prevVectors) {
+                        val hSol = solveAssociatedSystem(nMat, pv)
+                        if (hSol != null && isIndependent(list.map { it.first }, hSol)) {
+                            list.add(Pair(hSol, deg))
+                        }
+                    }
+
+                    // 2. Если система требовала линейной комбинации собственных векторов, добираем из Ker((A - λI)^deg)
+                    curPow = mulComplex(curPow, nMat)
+                    val extBasis = nullspaceComplex(curPow)
+                    for (cand in extBasis) {
+                        if (isIndependent(list.map { it.first }, cand)) {
+                            list.add(Pair(cand, deg))
+                        }
+                    }
+                    deg++
+                }
+                list
             }
 
             val chosenPair = chainVectors.getOrNull(mIdx)
@@ -1265,7 +1355,7 @@ class MatrixMath {
                 ?: Pair(Array(n) { zero }, 1)
             val targetVec = chosenPair.first
             val level = chosenPair.second
-            val (canonStr, unitStr) = formatBothForms(targetVec)
+            val (canonStr, unitStr) = formatBothForms(targetVec, level > 1)
 
             EigenvectorInfo(
                 index = eigIdx + 1,
@@ -1275,125 +1365,6 @@ class MatrixMath {
                 canon = canonStr,
                 unit = unitStr
             )
-        }
-    }
-    fun eigenvectors(
-        matrix: Array<DoubleArray>,
-        eigenvalues: List<Complex>
-    ): List<List<Complex>> {
-        val n = matrix.size
-        require(n > 0 && matrix.all { it.size == n }) { "Матрица должна быть непустой и квадратной" }
-        require(matrix.all { row -> row.all { it.isFinite() } }) { "Матрица содержит NaN или Infinity" }
-
-        val scale = max(1.0, matrix.maxOf { row -> row.maxOf { abs(it) } })
-        val zero = Complex(0.0)
-
-        // Счетчик кратности для выбора различных свободных переменных у кратных корней
-        val usedMultiplicity = mutableMapOf<Int, Int>()
-
-        return eigenvalues.mapIndexed { eigIdx, lambda ->
-            require(lambda.re.isFinite() && lambda.im.isFinite()) { "Некорректное собственное значение" }
-
-            // Определяем, встречалось ли уже это собственное значение ранее
-            val clusterRepresentative = (0 until eigIdx).firstOrNull { prev ->
-                (eigenvalues[prev] - lambda).abs() <= 1e-5 * scale
-            } ?: eigIdx
-            val multiplicityIndex = usedMultiplicity.getOrDefault(clusterRepresentative, 0)
-            usedMultiplicity[clusterRepresentative] = multiplicityIndex + 1
-
-            val shifted = Array(n) { i ->
-                Array(n) { j ->
-                    val value = Complex(matrix[i][j] / scale)
-                    if (i == j) value - Complex(lambda.re / scale, lambda.im / scale) else value
-                }
-            }
-
-            val pivotColumns = mutableListOf<Int>()
-            var pivotRow = 0
-            // Допуск согласован с точностью QR-алгоритма
-            val tolerance = 1e-6
-
-            for (col in 0 until n) {
-                if (pivotRow >= n) break
-                var bestRow = pivotRow
-                for (row in pivotRow + 1 until n) {
-                    if (shifted[row][col].abs() > shifted[bestRow][col].abs()) {
-                        bestRow = row
-                    }
-                }
-
-                if (shifted[bestRow][col].abs() <= tolerance) continue
-
-                val temp = shifted[pivotRow]
-                shifted[pivotRow] = shifted[bestRow]
-                shifted[bestRow] = temp
-
-                val pivot = shifted[pivotRow][col]
-                for (j in col until n) {
-                    shifted[pivotRow][j] = shifted[pivotRow][j] / pivot
-                }
-                for (row in 0 until n) {
-                    if (row == pivotRow) continue
-                    val factor = shifted[row][col]
-                    if (factor.abs() > 0.0) {
-                        for (j in col until n) {
-                            shifted[row][j] = shifted[row][j] - factor * shifted[pivotRow][j]
-                        }
-                    }
-                }
-                pivotColumns.add(col)
-                pivotRow++
-            }
-
-            // Если из-за численной погрешности λ все n столбцов оказались ведущими,
-            // освобождаем последний столбец (соответствующий наименьшему диагональному элементу).
-            if (pivotColumns.size == n) {
-                pivotColumns.removeAt(pivotColumns.lastIndex)
-            }
-
-            val pivotSet = pivotColumns.toSet()
-            val freeColumns = (0 until n).filter { it !in pivotSet }
-            val chosenFreeColumn = freeColumns[multiplicityIndex.coerceAtMost(freeColumns.lastIndex)]
-
-            val vector = Array(n) { zero }
-            vector[chosenFreeColumn] = Complex(1.0)
-
-            for (row in pivotColumns.indices) {
-                val col = pivotColumns[row]
-                var sum = zero
-                for (freeCol in freeColumns) {
-                    sum = sum + shifted[row][freeCol] * vector[freeCol]
-                }
-                vector[col] = -sum
-            }
-
-            var vectorNorm = 0.0
-            for (value in vector) {
-                vectorNorm = hypot(vectorNorm, value.abs())
-            }
-            if (!vectorNorm.isFinite() || vectorNorm == 0.0) {
-                throw ArithmeticException("Получен некорректный собственный вектор")
-            }
-
-            val normalized = vector.map { it / vectorNorm }
-
-            // Проверка Av ≈ λv
-            var residual = 0.0
-            for (i in 0 until n) {
-                var av = zero
-                for (j in 0 until n) {
-                    av = av + Complex(matrix[i][j] / scale) * normalized[j]
-                }
-                val lv = Complex(lambda.re / scale, lambda.im / scale) * normalized[i]
-                residual = hypot(residual, (av - lv).abs())
-            }
-
-            val relativeResidual = residual / max(1.0, lambda.abs() / scale)
-            if (!relativeResidual.isFinite() || relativeResidual > 1e-3) {
-                throw ArithmeticException("Собственный вектор для λ = $lambda не прошёл проверку невязки ($relativeResidual)")
-            }
-
-            normalized
         }
     }
 
