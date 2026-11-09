@@ -1627,29 +1627,56 @@
         if (curN === 1) res.push(new Complex(a[0][0]));
         return res.sort((x, y) => y.abs() - x.abs());
       },
-      eigenvectors(matrix, eigs) {
+      eigenvectorsWithDetails(matrix, eigs) {
         const n = matrix.length;
         const scale = Math.max(1, ...matrix.flat().map(v => Math.abs(v)));
         const usedMult = {};
-        return eigs.map((lam, idx) => {
-          let rep = idx;
-          for (let p = 0; p < idx; p++) {
-            if (eigs[p].sub(lam).abs() <= 1e-5 * scale) { rep = p; break; }
-          }
-          const mIdx = usedMult[rep] || 0;
-          usedMult[rep] = mIdx + 1;
-          const sh = Array.from({ length: n }, (_, i) =>
-            Array.from({ length: n }, (_, j) => {
-              const v = new Complex(matrix[i][j] / scale);
-              return i === j ? v.sub(new Complex(lam.re / scale, lam.im / scale)) : v;
-            })
+
+        const formatBothForms = (vec) => {
+          let maxAbs = 0;
+          for (const v of vec) maxAbs = Math.max(maxAbs, v.abs());
+          if (maxAbs < 1e-12) return { canon: "[ 0 ]ᵀ", unit: "[ 0 ]ᵀ" };
+
+          // 1. Нормированный вид (единичная длина L2)
+          let l2Norm = 0;
+          for (const v of vec) l2Norm = Math.hypot(l2Norm, v.abs());
+          const normalizedL2 = vec.map(v => v.div(l2Norm || 1));
+          const unitStr = "[ " + normalizedL2.map(v => v.toString()).join(", ") + " ]ᵀ";
+
+          // 2. Ненормированный (целочисленный / канонический) вид
+          const nonZero = vec.filter(v => v.abs() > 1e-4 * maxAbs);
+          let ref = nonZero[0];
+          for (const v of nonZero) if (v.abs() < ref.abs()) ref = v;
+          const test = vec.map(v => v.div(ref));
+          const allNice = test.every(v =>
+            Math.abs(v.re - Math.round(v.re)) < 1e-3 &&
+            Math.abs(v.im - Math.round(v.im)) < 1e-3 &&
+            v.abs() <= 20
           );
+
+          let canonVec;
+          if (allNice) {
+            canonVec = test.map(v => new Complex(
+              Math.abs(v.re) < 1e-5 ? 0 : Math.round(v.re),
+              Math.abs(v.im) < 1e-5 ? 0 : Math.round(v.im)
+            ));
+          } else {
+            let biggest = nonZero[0];
+            for (const v of nonZero) if (v.abs() > biggest.abs()) biggest = v;
+            canonVec = vec.map(v => v.div(biggest));
+          }
+          const canonStr = "[ " + canonVec.map(v => v.toString()).join(", ") + " ]ᵀ";
+          return { canon: canonStr, unit: unitStr };
+        };
+
+        const nullspaceComplex = (mInput) => {
+          const sh = mInput.map(r => r.slice());
           const pivCols = [];
           let pivRow = 0;
           for (let col = 0; col < n && pivRow < n; col++) {
             let best = pivRow;
             for (let r = pivRow + 1; r < n; r++) if (sh[r][col].abs() > sh[best][col].abs()) best = r;
-            if (sh[best][col].abs() <= 1e-6) continue;
+            if (sh[best][col].abs() <= 1e-5) continue;
             [sh[pivRow], sh[best]] = [sh[best], sh[pivRow]];
             const pv = sh[pivRow][col];
             for (let j = col; j < n; j++) sh[pivRow][j] = sh[pivRow][j].div(pv);
@@ -1663,18 +1690,98 @@
           }
           if (pivCols.length === n) pivCols.pop();
           const freeCols = Array.from({ length: n }, (_, i) => i).filter(c => !pivCols.includes(c));
-          const chosen = freeCols[Math.min(mIdx, freeCols.length - 1)];
-          const vec = Array.from({ length: n }, () => new Complex(0));
-          vec[chosen] = new Complex(1);
-          for (let r = 0; r < pivCols.length; r++) {
-            const c = pivCols[r];
-            let s = new Complex(0);
-            for (const fc of freeCols) s = s.add(sh[r][fc].mul(vec[fc]));
-            vec[c] = s.neg();
+          return freeCols.map(fc => {
+            const vec = Array.from({ length: n }, () => new Complex(0));
+            vec[fc] = new Complex(1);
+            for (let r = 0; r < pivCols.length; r++) {
+              const c = pivCols[r];
+              let s = new Complex(0);
+              for (const fCol of freeCols) s = s.add(sh[r][fCol].mul(vec[fCol]));
+              vec[c] = s.neg();
+            }
+            return vec;
+          });
+        };
+
+        const mulComplexMat = (m1, m2) => {
+          const out = Array.from({ length: n }, () => Array.from({ length: n }, () => new Complex(0)));
+          for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+              let s = new Complex(0);
+              for (let k = 0; k < n; k++) s = s.add(m1[i][k].mul(m2[k][j]));
+              out[i][j] = s;
+            }
           }
-          let norm = 0;
-          for (const v of vec) norm = Math.hypot(norm, v.abs());
-          return vec.map(v => v.div(norm || 1));
+          return out;
+        };
+
+        const isIndependent = (existing, candidate) => {
+          if (!existing.length) return true;
+          const cols = existing.length + 1;
+          const realMat = Array.from({ length: 2 * n }, () => Array(2 * cols).fill(0));
+          existing.forEach((vec, c) => {
+            for (let r = 0; r < n; r++) {
+              realMat[r][c] = vec[r].re;
+              realMat[r][c + cols] = -vec[r].im;
+              realMat[r + n][c] = vec[r].im;
+              realMat[r + n][c + cols] = vec[r].re;
+            }
+          });
+          const lastC = cols - 1;
+          for (let r = 0; r < n; r++) {
+            realMat[r][lastC] = candidate[r].re;
+            realMat[r][lastC + cols] = -candidate[r].im;
+            realMat[r + n][lastC] = candidate[r].im;
+            realMat[r + n][lastC + cols] = candidate[r].re;
+          }
+          return this.rank(realMat) / 2 > existing.length;
+        };
+
+        return eigs.map((lam, idx) => {
+          let rep = idx;
+          for (let p = 0; p < idx; p++) {
+            if (eigs[p].sub(lam).abs() <= 1e-4 * scale) { rep = p; break; }
+          }
+          const mIdx = usedMult[rep] || 0;
+          usedMult[rep] = mIdx + 1;
+
+          const nMat = Array.from({ length: n }, (_, i) =>
+            Array.from({ length: n }, (_, j) => {
+              const v = new Complex(matrix[i][j] / scale);
+              return i === j ? v.sub(new Complex(lam.re / scale, lam.im / scale)) : v;
+            })
+          );
+
+          const chainVectors = [];
+          for (const vec of nullspaceComplex(nMat)) {
+            if (isIndependent(chainVectors.map(p => p.vec), vec)) {
+              chainVectors.push({ vec, level: 1 });
+            }
+          }
+
+          let curPow = nMat;
+          for (let deg = 2; chainVectors.length <= mIdx && deg <= n; deg++) {
+            curPow = mulComplexMat(curPow, nMat);
+            const extBasis = nullspaceComplex(curPow);
+            for (const cand of extBasis) {
+              if (isIndependent(chainVectors.map(p => p.vec), cand)) {
+                chainVectors.push({ vec: cand, level: deg });
+                if (chainVectors.length > mIdx) break;
+              }
+            }
+          }
+
+          const chosen = chainVectors[mIdx] || chainVectors[chainVectors.length - 1] || { vec: Array(n).fill(new Complex(0)), level: 1 };
+          const normInfo = formatBothForms(chosen.vec);
+
+          return {
+            index: idx + 1,
+            lambda: lam,
+            isAssociated: chosen.level > 1,
+            chainLevel: chosen.level,
+            canon: normInfo.canon,
+            unit: normInfo.unit
+          };
         });
       },
       controllability(a, b) {
@@ -2327,9 +2434,12 @@
             showResult({ title: `Собственные числа λ_i (${name})`, scalarText: eigs.map((e, i) => `λ_${i + 1} = ${e}`).join("\n") });
           } else if (op === "eigVecs") {
             const eigs = MatrixMath.eigenvalues(cur);
-            const vecs = MatrixMath.eigenvectors(cur, eigs);
-            const txt = vecs.map((v, i) => `v_${i + 1} (λ_${i + 1} = ${eigs[i]}):\n[ ${v.join(", ")} ]ᵀ`).join("\n\n");
-            showResult({ title: `Собственные векторы v_i (${name})`, scalarText: txt });
+            const items = MatrixMath.eigenvectorsWithDetails(cur, eigs);
+            const txt = items.map(it => {
+              const typeStr = it.isAssociated ? `Присоединенный вектор (ур. ${it.chainLevel})` : `Собственный вектор`;
+              return `v_${it.index} (λ_${it.index} = ${it.lambda}) — ${typeStr}:\n  Ненормированный: ${it.canon}\n  Нормированный:   ${it.unit}`;
+            }).join("\n\n");
+            showResult({ title: `Собственные и присоед. векторы (${name})`, scalarText: txt });
           } else if (op === "jnf") {
             const grid = MatrixMath.jordanForms(cur, false);
             showResult({ title: `Комплексная ЖНФ (${name})`, scalarText: "Каноническая форма Жордана:", stringGrid: grid });
