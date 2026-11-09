@@ -1713,6 +1713,52 @@
           });
         };
 
+        const solveAssociatedSystem = (nMat, rhs) => {
+          const aug = nMat.map((row, r) => [...row, rhs[r]]);
+          const pivCols = [];
+          let pivRow = 0;
+          for (let col = 0; col < n && pivRow < n; col++) {
+            let best = pivRow;
+            for (let r = pivRow + 1; r < n; r++) if (aug[r][col].abs() > aug[best][col].abs()) best = r;
+            if (aug[best][col].abs() <= 1e-5) continue;
+            [aug[pivRow], aug[best]] = [aug[best], aug[pivRow]];
+            const pv = aug[pivRow][col];
+            for (let j = col; j <= n; j++) aug[pivRow][j] = aug[pivRow][j].div(pv);
+            for (let r = 0; r < n; r++) {
+              if (r === pivRow) continue;
+              const f = aug[r][col];
+              for (let j = col; j <= n; j++) aug[r][j] = aug[r][j].sub(f.mul(aug[pivRow][j]));
+            }
+            pivCols.push(col);
+            pivRow++;
+          }
+          for (let r = pivRow; r < n; r++) {
+            if (aug[r][n].abs() > 1e-4) return null;
+          }
+          const h0 = Array.from({ length: n }, () => new Complex(0));
+          pivCols.forEach((col, r) => { h0[col] = aug[r][n]; });
+
+          const kerBasis = nullspaceComplex(nMat);
+          const candidates = [h0];
+          for (const kv of kerBasis) {
+            for (const c of [1, -1]) {
+              candidates.push(h0.map((v, i) => v.add(kv[i].mul(c))));
+            }
+          }
+          candidates.sort((a, b) => {
+            const nzA = a.filter(x => x.abs() > 1e-5).length;
+            const nzB = b.filter(x => x.abs() > 1e-5).length;
+            if (nzA !== nzB) return nzA - nzB;
+            const negA = a.filter(x => x.re < -1e-5).length;
+            const negB = b.filter(x => x.re < -1e-5).length;
+            if (negA !== negB) return negA - negB;
+            const firstA = a.findIndex(x => x.abs() > 1e-5);
+            const firstB = b.findIndex(x => x.abs() > 1e-5);
+            return firstB - firstA;
+          });
+          return candidates[0];
+        };
+
         const mulComplexMat = (m1, m2) => {
           const out = Array.from({ length: n }, () => Array.from({ length: n }, () => new Complex(0)));
           for (let i = 0; i < n; i++) {
@@ -1725,16 +1771,8 @@
           return out;
         };
 
-        const mulComplexMatVec = (m, vec) => {
-          return Array.from({ length: n }, (_, i) => {
-            let s = new Complex(0);
-            for (let j = 0; j < n; j++) s = s.add(m[i][j].mul(vec[j]));
-            return s;
-          });
-        };
-
         const isIndependent = (existing, candidate) => {
-          if (!existing.length) return true;
+          if (!existing.length) return candidate.some(x => x.abs() > 1e-5);
           const cols = existing.length + 1;
           const realMat = Array.from({ length: 2 * n }, () => Array(2 * cols).fill(0));
           existing.forEach((vec, c) => {
@@ -1783,34 +1821,18 @@
 
             let curPow = nMat;
             for (let deg = 2; chainVectors.length < n && deg <= n; deg++) {
+              const prevVectors = chainVectors.filter(p => p.level === deg - 1);
+              for (const pv of prevVectors) {
+                const hSol = solveAssociatedSystem(nMat, pv.vec);
+                if (hSol && isIndependent(chainVectors.map(p => p.vec), hSol)) {
+                  chainVectors.push({ vec: hSol, level: deg });
+                }
+              }
               curPow = mulComplexMat(curPow, nMat);
               const extBasis = nullspaceComplex(curPow);
-              const prevVectors = chainVectors.filter(p => p.level === deg - 1);
-
-              const scaledCandidates = [...extBasis].reverse().map(cand => {
-                const mapped = mulComplexMatVec(nMat, cand);
-                let scaledCand = cand;
-                for (const pv of prevVectors) {
-                  const nzIdx = pv.vec.findIndex(x => x.abs() > 1e-5);
-                  if (nzIdx !== -1 && mapped[nzIdx].abs() > 1e-5) {
-                    const alpha = mapped[nzIdx].div(pv.vec[nzIdx]);
-                    const check = pv.vec.every((x, i) => mapped[i].sub(x.mul(alpha)).abs() < 1e-4);
-                    if (check) {
-                      scaledCand = cand.map(x => x.div(alpha));
-                      break;
-                    }
-                  }
-                }
-                return scaledCand;
-              }).sort((a, b) => {
-                const negA = a.filter(x => x.re < -1e-5).length;
-                const negB = b.filter(x => x.re < -1e-5).length;
-                return negA - negB;
-              });
-
-              for (const scaledCand of scaledCandidates) {
-                if (isIndependent(chainVectors.map(p => p.vec), scaledCand)) {
-                  chainVectors.push({ vec: scaledCand, level: deg });
+              for (const cand of extBasis) {
+                if (isIndependent(chainVectors.map(p => p.vec), cand)) {
+                  chainVectors.push({ vec: cand, level: deg });
                 }
               }
             }
