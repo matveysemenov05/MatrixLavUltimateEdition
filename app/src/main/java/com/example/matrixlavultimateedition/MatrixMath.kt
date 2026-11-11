@@ -599,7 +599,7 @@ class MatrixMath {
     }
 
     // --- КРИТЕРИИ КАЛМАНА (ТАУ) ---
-    // --- КРИТЕРИИ КАЛМАНА (ТАУ) БЕЗ ПУСТЫХ НУЛЕВЫХ СТОЛБЦОВ/СТРОК ---
+    // --- КРИТЕРИИ КАЛМАНА (ТАУ) БЕЗ ПУСТЫХ НУЛЕВЫХ ---
     fun controllability(a: Array<DoubleArray>, b: Array<DoubleArray>): Array<DoubleArray> {
         val n = a.size
         require(n > 0 && a.all { it.size == n } && a.all { row -> row.all { it.isFinite() } }) {
