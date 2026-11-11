@@ -375,7 +375,7 @@ fun SquareMatricesScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var operationCategory by rememberSaveable { mutableIntStateOf(0) }
-
+    var designColsB by rememberSaveable { mutableIntStateOf(1) }
     var lastResultTitle by remember { mutableStateOf("Результат") }
     var lastResultMatrix by remember { mutableStateOf<Array<DoubleArray>?>(null) }
     var lastResultGrid by remember { mutableStateOf<List<List<String>>?>(null) }
@@ -1011,11 +1011,18 @@ fun SquareMatricesScreen(
                                 showFrobeniusDialog = true
                             }
                             AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) {
-                                // Автоматически берем текущие матрицы A и первый столбец B с главного экрана
                                 designSize = size
                                 designSizeInput = size.toString()
+                                val parsedB = runCatching { parse(matrixB) }.getOrNull()
+                                val activeCols = if (parsedB != null) {
+                                    val lastNZ = (size - 1 downTo 0).firstOrNull { col ->
+                                        (0 until size).any { row -> abs(parsedB[row][col]) > 1e-12 }
+                                    } ?: 0
+                                    (lastNZ + 1).coerceIn(1, size)
+                                } else 1
+                                designColsB = activeCols
                                 designA = resizeMatrix(matrixA, size, size)
-                                designB = List(size) { r -> listOf(matrixB.getOrNull(r)?.getOrNull(0) ?: "0") }
+                                designB = resizeMatrix(matrixB, size, designColsB)
                                 val initEigs = runCatching { math.eigenvalues(parse(designA)) }.getOrDefault(emptyList())
                                 poleAssignments = List(size) { i -> initEigs.getOrNull(i)?.toString()?.replace(" ", "") ?: "-1" }
                                 showPolesDialog = true
@@ -1322,33 +1329,93 @@ fun SquareMatricesScreen(
 
                 Column(modifier = Modifier.heightIn(max = 580.dp).verticalScroll(rememberScrollState())) {
                     Text(
-                        "Система в реальном времени синхронизирована с главным экраном.",
+                        "Система в реальном времени синхронизирована с главным экраном. Матрица B может иметь любую размерность n×m.",
                         color = TextDim,
                         fontSize = 11.5.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Размер n:", color = TextWhite, fontWeight = FontWeight.SemiBold)
-                        CounterButton("−", designSize > 2) {
-                            if (designSize > 2) {
-                                designSize--; designSizeInput = designSize.toString()
-                                designA = resizeMatrix(designA, designSize, designSize)
-                                designB = resizeMatrix(designB, designSize, 1)
-                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
-                                syncDialogToMain(designSize, designA, designB)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF0B1322))
+                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Состояния (n)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CounterButton("−", designSize > 2) {
+                                    if (designSize > 2) {
+                                        designSize--; designSizeInput = designSize.toString()
+                                        designA = resizeMatrix(designA, designSize, designSize)
+                                        designB = resizeMatrix(designB, designSize, designColsB)
+                                        poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                        syncDialogToMain(designSize, designA, designB)
+                                    }
+                                }
+                                Text(
+                                    "$designSize",
+                                    color = AccentCyan,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                CounterButton("+", designSize < 7) {
+                                    if (designSize < 7) {
+                                        designSize++; designSizeInput = designSize.toString()
+                                        designA = resizeMatrix(designA, designSize, designSize)
+                                        designB = resizeMatrix(designB, designSize, designColsB)
+                                        poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                        syncDialogToMain(designSize, designA, designB)
+                                    }
+                                }
                             }
                         }
-                        Text("${designSize}×$designSize", color = TextWhite, fontWeight = FontWeight.Bold)
-                        CounterButton("+", designSize < 7) {
-                            if (designSize < 7) {
-                                designSize++; designSizeInput = designSize.toString()
-                                designA = resizeMatrix(designA, designSize, designSize)
-                                designB = resizeMatrix(designB, designSize, 1)
-                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
-                                syncDialogToMain(designSize, designA, designB)
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF0B1322))
+                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Столбцов B (m)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CounterButton("−", designColsB > 1) {
+                                    if (designColsB > 1) {
+                                        designColsB--
+                                        designB = resizeMatrix(designB, designSize, designColsB)
+                                        syncDialogToMain(designSize, designA, designB)
+                                    }
+                                }
+                                Text(
+                                    "$designColsB",
+                                    color = AccentPurple,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                CounterButton("+", designColsB < 7) {
+                                    if (designColsB < 7) {
+                                        designColsB++
+                                        designB = resizeMatrix(designB, designSize, designColsB)
+                                        syncDialogToMain(designSize, designA, designB)
+                                    }
+                                }
                             }
                         }
                     }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("A (${designSize}×${designSize})", color = AccentCyan, fontWeight = FontWeight.Bold)
                     MatrixGridInput(designSize, designSize, designA, AccentCyan, 42.dp, 12.sp) { r, c, v ->
@@ -1356,9 +1423,9 @@ fun SquareMatricesScreen(
                         syncDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("B (${designSize}×1)", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(designSize, 1, designB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
-                        designB = designB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
+                    Text("B (${designSize}×${designColsB}) — матрица входов", color = AccentPurple, fontWeight = FontWeight.Bold)
+                    MatrixGridInput(designSize, designColsB, designB, AccentPurple, 44.dp, 12.sp) { r, c, v ->
+                        designB = designB.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
                         syncDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(10.dp))
@@ -1480,7 +1547,7 @@ fun SquareMatricesScreen(
                             appendLine("Спектр замкнутой системы A − BK:")
                             newSpectrum.forEachIndexed { idx, c -> appendLine("μ${toSubscript((idx + 1).toString())} = $c") }
                             appendLine()
-                            append("Матрица обратной связи K (u = −Kx):")
+                            append("Матрица обратной связи K (${kMat.size}×${kMat[0].size}, u = −Kx):")
                         }
                         isError = false
                         onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))

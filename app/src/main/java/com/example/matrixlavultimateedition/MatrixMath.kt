@@ -599,6 +599,7 @@ class MatrixMath {
     }
 
     // --- КРИТЕРИИ КАЛМАНА (ТАУ) ---
+    // --- КРИТЕРИИ КАЛМАНА (ТАУ) БЕЗ ПУСТЫХ НУЛЕВЫХ СТОЛБЦОВ/СТРОК ---
     fun controllability(a: Array<DoubleArray>, b: Array<DoubleArray>): Array<DoubleArray> {
         val n = a.size
         require(n > 0 && a.all { it.size == n } && a.all { row -> row.all { it.isFinite() } }) {
@@ -607,16 +608,22 @@ class MatrixMath {
         require(b.size == n && b.isNotEmpty() && b.all { row -> row.all { it.isFinite() } }) {
             "Матрица B должна иметь $n строк"
         }
-        val m = b[0].size
-        require(m > 0 && b.all { it.size == m }) { "Некорректная размерность матрицы B" }
+
+        // Определяем реальное число заполненных столбцов m (обрезаем пустые нулевые столбцы справа)
+        val lastActiveCol = (b[0].size - 1 downTo 0).firstOrNull { col ->
+            (0 until n).any { row -> abs(b[row][col]) > 1e-12 }
+        } ?: 0
+        val m = lastActiveCol + 1
+        val cleanB = Array(n) { r -> DoubleArray(m) { c -> b[r][c] } }
 
         val wc = Array(n) { DoubleArray(n * m) }
-        var current = Array(n) { b[it].clone() }
+        var current = cleanB
 
         for (k in 0 until n) {
             for (i in 0 until n) {
                 for (j in 0 until m) {
-                    wc[i][k * m + j] = current[i][j]
+                    val v = current[i][j]
+                    wc[i][k * m + j] = if (abs(v) < 1e-12) 0.0 else v
                 }
             }
             if (k < n - 1) {
@@ -634,15 +641,22 @@ class MatrixMath {
         require(c.isNotEmpty() && c.all { it.size == n } && c.all { row -> row.all { it.isFinite() } }) {
             "Матрица C должна иметь $n столбцов"
         }
-        val p = c.size
+
+        // Определяем реальное число заполненных строк p (обрезаем пустые нулевые строки снизу)
+        val lastActiveRow = (c.size - 1 downTo 0).firstOrNull { row ->
+            (0 until n).any { col -> abs(c[row][col]) > 1e-12 }
+        } ?: 0
+        val p = lastActiveRow + 1
+        val cleanC = Array(p) { r -> c[r].clone() }
 
         val wo = Array(n * p) { DoubleArray(n) }
-        var current = Array(p) { c[it].clone() }
+        var current = cleanC
 
         for (k in 0 until n) {
             for (i in 0 until p) {
                 for (j in 0 until n) {
-                    wo[k * p + i][j] = current[i][j]
+                    val v = current[i][j]
+                    wo[k * p + i][j] = if (abs(v) < 1e-12) 0.0 else v
                 }
             }
             if (k < n - 1) {
@@ -651,6 +665,7 @@ class MatrixMath {
         }
         return wo
     }
+
 
     // --- СИНТЕЗ ТАУ (Фробениус, Аккерман, LQR) ---
     fun frobeniusForm(matA: Array<DoubleArray>, matB: Array<DoubleArray>): Triple<Array<DoubleArray>, Array<DoubleArray>, Array<DoubleArray>>? {
@@ -1738,17 +1753,67 @@ class MatrixMath {
     ): Array<DoubleArray> {
         val n = matA.size
         require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной" }
-        require(matB.size == n && matB.all { it.size == 1 }) { "Матрица B должна иметь размерность n×1" }
+        val m = matB.firstOrNull()?.size ?: 0
+        require(matB.size == n && m >= 1 && matB.all { it.size == m }) {
+            "Матрица B должна иметь размерность n×m"
+        }
         require(desiredPoles.isNotEmpty() && desiredPoles.size <= n) {
             "Количество полюсов должно быть от 1 до $n"
         }
 
-        val w = controllability(matA, matB)
-        val r = rank(w)
-        require(r > 0) { "Матрица B нулевая (rank(W_c) = 0) — управление невозможно." }
+        val wTotal = controllability(matA, matB)
+        val rTotal = rank(wTotal)
+        require(rTotal > 0) { "Матрица B нулевая (rank(W_c) = 0) — управление невозможно." }
+
+        // Если m > 1 (несколько столбцов в B), сводим к эквивалентному одноканальному входу b_eff = B * g,
+        // сохраняющему максимальный ранг управляемости rTotal:
+        if (m > 1) {
+            var chosenG = DoubleArray(m) { 0.0 }
+            var bEff = Array(n) { DoubleArray(1) }
+            var foundSingle = false
+
+            // 1. Проверяем, дает ли один из столбцов B полный ранг rTotal
+            for (col in 0 until m) {
+                val singleB = Array(n) { r -> doubleArrayOf(matB[r][col]) }
+                if (rank(controllability(matA, singleB)) == rTotal) {
+                    chosenG[col] = 1.0
+                    bEff = singleB
+                    foundSingle = true
+                    break
+                }
+            }
+
+            // 2. Иначе берем комбинацию столбцов B * g, которая дает ранг rTotal
+            if (!foundSingle) {
+                val candidatesG = listOf(
+                    DoubleArray(m) { 1.0 },
+                    DoubleArray(m) { j -> (j + 1).toDouble() },
+                    DoubleArray(m) { j -> if (j % 2 == 0) 1.0 else -1.0 },
+                    DoubleArray(m) { j -> 1.0 / (j + 1).toDouble() }
+                )
+                for (gVec in candidatesG) {
+                    val testB = Array(n) { r ->
+                        var s = 0.0
+                        for (c in 0 until m) s += matB[r][c] * gVec[c]
+                        doubleArrayOf(s)
+                    }
+                    if (rank(controllability(matA, testB)) == rTotal) {
+                        chosenG = gVec
+                        bEff = testB
+                        break
+                    }
+                }
+            }
+
+            val kSingle = ackermann(matA, bEff, desiredPoles) // 1 × n
+            // Разворачиваем в матрицу K размера m × n: K = g * kSingle
+            return Array(m) { row ->
+                DoubleArray(n) { col -> chosenG[row] * kSingle[0][col] }
+            }
+        }
 
         fun ackermannFull(ac: Array<DoubleArray>, bc: Array<DoubleArray>, poles: List<Complex>): Array<DoubleArray> {
-            val m = ac.size
+            val dim = ac.size
             var coeffs = arrayOf(Complex(1.0))
             for (pole in poles) {
                 val next = Array(coeffs.size + 1) { Complex(0.0) }
@@ -1762,26 +1827,26 @@ class MatrixMath {
             require(coeffs.all { abs(it.im) <= 1e-5 * cScale }) {
                 "Комплексные управляемые полюса должны образовывать сопряжённые пары!"
             }
-            val realCoeffs = DoubleArray(m + 1) { coeffs[it].re }
+            val realCoeffs = DoubleArray(dim + 1) { coeffs[it].re }
             val wc = controllability(ac, bc)
             val wcInv = inverse(wc) ?: throw ArithmeticException("Не удалось обратить матрицу управляемости подсистемы")
 
-            var polyMat = Array(m) { DoubleArray(m) }
-            for (i in 0..m) {
-                val pwr = matrixPower(ac, m - i) ?: throw ArithmeticException("Ошибка степени матрицы")
+            var polyMat = Array(dim) { DoubleArray(dim) }
+            for (i in 0..dim) {
+                val pwr = matrixPower(ac, dim - i) ?: throw ArithmeticException("Ошибка степени матрицы")
                 polyMat = add(polyMat, multiplyScalar(pwr, realCoeffs[i])) ?: throw ArithmeticException("Ошибка полинома")
             }
-            val lastRow = wcInv[m - 1]
-            val kRow = Array(1) { DoubleArray(m) }
-            for (j in 0 until m) {
+            val lastRow = wcInv[dim - 1]
+            val kRow = Array(1) { DoubleArray(dim) }
+            for (j in 0 until dim) {
                 var sum = 0.0
-                for (i in 0 until m) sum += lastRow[i] * polyMat[i][j]
+                for (i in 0 until dim) sum += lastRow[i] * polyMat[i][j]
                 kRow[0][j] = sum
             }
             return kRow
         }
 
-        if (r == n) {
+        if (rTotal == n) {
             require(desiredPoles.size == n) { "Для полностью управляемой системы укажите $n полюсов" }
             return ackermannFull(matA, matB, desiredPoles)
         }
@@ -1793,19 +1858,19 @@ class MatrixMath {
         val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
         val bTilde = multiply(tInv, matB)!!
 
-        val ac = Array(r) { i -> DoubleArray(r) { j -> aTilde[i][j] } }
-        val bc = Array(r) { i -> DoubleArray(1) { bTilde[i][0] } }
+        val ac = Array(rTotal) { i -> DoubleArray(rTotal) { j -> aTilde[i][j] } }
+        val bc = Array(rTotal) { i -> DoubleArray(1) { bTilde[i][0] } }
 
         val allOpenPoles = eigenvalues(matA)
         val ctrlFlags = getControllableModeFlags(matA, matB, allOpenPoles)
         val controllableTargetPoles = if (desiredPoles.size == n) {
             desiredPoles.filterIndexed { index, _ -> ctrlFlags[index] }
         } else {
-            desiredPoles.take(r)
+            desiredPoles.take(rTotal)
         }
 
         val kc = ackermannFull(ac, bc, controllableTargetPoles)
-        val kTilde = Array(1) { DoubleArray(n) { j -> if (j < r) kc[0][j] else 0.0 } }
+        val kTilde = Array(1) { DoubleArray(n) { j -> if (j < rTotal) kc[0][j] else 0.0 } }
         return multiply(kTilde, tInv) ?: throw ArithmeticException("Ошибка обратного преобразования K")
     }
 }
