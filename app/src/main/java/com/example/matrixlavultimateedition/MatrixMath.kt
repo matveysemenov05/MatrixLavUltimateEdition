@@ -1665,68 +1665,169 @@ class MatrixMath {
      * Строит ортогональное разложение Калмана (x = T * z, где T^-1 = T^T) методом Грама–Шмидта
      * для частично управляемой системы (1 <= rank(W_c) = r < n).
      */
+    /** Обрезает пустые нулевые столбцы справа у матрицы B */
+    private fun trimZeroColsB(b: Array<DoubleArray>): Array<DoubleArray> {
+        val n = b.size
+        val lastActiveCol = (b[0].size - 1 downTo 0).firstOrNull { col ->
+            (0 until n).any { row -> abs(b[row][col]) > 1e-12 }
+        } ?: 0
+        val m = lastActiveCol + 1
+        return Array(n) { r -> DoubleArray(m) { c -> b[r][c] } }
+    }
+
+    /** Обрезает пустые нулевые строки снизу у матрицы C */
+    private fun trimZeroRowsC(c: Array<DoubleArray>): Array<DoubleArray> {
+        val n = c[0].size
+        val lastActiveRow = (c.size - 1 downTo 0).firstOrNull { row ->
+            (0 until n).any { col -> abs(c[row][col]) > 1e-12 }
+        } ?: 0
+        val p = lastActiveRow + 1
+        return Array(p) { r -> c[r].clone() }
+    }
+
+    /**
+     * Разложение на управляемое и неуправляемое подпространства КАК В ТЕТРАДИ
+     * (Конспект 1, стр. 1-5 и Конспект 2, стр. 3):
+     * Первые r столбцов S — независимые столбцы из U = [B, AB, ...],
+     * остальные n - r столбцов — единичные векторы-орты e_k.
+     */
+    private fun kalmanNotebookDecomposition(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>
+    ): Triple<Int, Array<DoubleArray>, Array<DoubleArray>>? {
+        val n = matA.size
+        val cleanB = trimZeroColsB(matB)
+        val w = controllability(matA, cleanB)
+        val r = rank(w)
+        if (r <= 0 || r >= n) return null
+
+        val basisCols = mutableListOf<DoubleArray>()
+        for (col in 0 until w[0].size) {
+            if (basisCols.size == r) break
+            val candidate = DoubleArray(n) { row -> w[row][col] }
+            if (candidate.all { abs(it) < 1e-12 }) continue
+            val testMat = Array(n) { row ->
+                DoubleArray(basisCols.size + 1) { cIdx ->
+                    if (cIdx < basisCols.size) basisCols[cIdx][row] else candidate[row]
+                }
+            }
+            if (rank(testMat) > basisCols.size) {
+                basisCols.add(candidate)
+            }
+        }
+
+        // Если в последней строке выбранных столбцов есть отрицательные числа (Конспект 1, стр. 1) —
+        // берем e_2 = [0,1,0]^T, иначе берем с конца e_n = [0,0,1]^T (Конспект 1 стр. 3-4 и Конспект 2 стр. 3)
+        val unitOrder = if (basisCols.any { it[n - 1] < -1e-9 }) {
+            (1 until n).toList() + listOf(0)
+        } else {
+            (n - 1 downTo 0).toList()
+        }
+
+        for (k in unitOrder) {
+            if (basisCols.size == n) break
+            val eVec = DoubleArray(n) { row -> if (row == k) 1.0 else 0.0 }
+            val testMat = Array(n) { row ->
+                DoubleArray(basisCols.size + 1) { cIdx ->
+                    if (cIdx < basisCols.size) basisCols[cIdx][row] else eVec[row]
+                }
+            }
+            if (rank(testMat) > basisCols.size) {
+                basisCols.add(eVec)
+            }
+        }
+
+        if (basisCols.size != n) return null
+        val sMat = Array(n) { row -> DoubleArray(n) { col -> basisCols[col][row] } }
+        val sInv = inverse(sMat) ?: return null
+        return Triple(r, sMat, sInv)
+    }
+
+    /**
+     * Спектральное разложение Калмана для синтеза регулятора (Конспект 2, стр. 6-12):
+     * Дополняет управляемое подпространство собственными векторами неуправляемых мод,
+     * чтобы не зацеплять неуправляемую часть и получать Θ = (-6, 0, -6).
+     */
     private fun kalmanOrthogonalDecomposition(
         matA: Array<DoubleArray>,
         matB: Array<DoubleArray>
     ): Triple<Int, Array<DoubleArray>, Array<DoubleArray>>? {
         val n = matA.size
-        val w = controllability(matA, matB)
+        val cleanB = trimZeroColsB(matB)
+        val w = controllability(matA, cleanB)
         val r = rank(w)
         if (r <= 0 || r >= n) return null
 
-        val basis = mutableListOf<DoubleArray>()
-        // 1. Ортонормированный базис управляемого подпространства Im(W_c)
+        val basisCols = mutableListOf<DoubleArray>()
         for (col in 0 until w[0].size) {
-            if (basis.size == r) break
-            val v = DoubleArray(n) { row -> w[row][col] }
-            for (q in basis) {
-                var dot = 0.0
-                for (i in 0 until n) dot += v[i] * q[i]
-                for (i in 0 until n) v[i] -= dot * q[i]
+            if (basisCols.size == r) break
+            val candidate = DoubleArray(n) { row -> w[row][col] }
+            if (candidate.all { abs(it) < 1e-12 }) continue
+            val testMat = Array(n) { row ->
+                DoubleArray(basisCols.size + 1) { cIdx ->
+                    if (cIdx < basisCols.size) basisCols[cIdx][row] else candidate[row]
+                }
             }
-            var norm = 0.0
-            for (i in 0 until n) norm = hypot(norm, v[i])
-            if (norm > 1e-9) {
-                basis.add(DoubleArray(n) { i -> v[i] / norm })
-            }
-        }
-        // 2. Дополняем ортонормированным базисом ортогонального дополнения до R^n
-        for (k in 0 until n) {
-            if (basis.size == n) break
-            val v = DoubleArray(n) { row -> if (row == k) 1.0 else 0.0 }
-            for (q in basis) {
-                var dot = 0.0
-                for (i in 0 until n) dot += v[i] * q[i]
-                for (i in 0 until n) v[i] -= dot * q[i]
-            }
-            var norm = 0.0
-            for (i in 0 until n) norm = hypot(norm, v[i])
-            if (norm > 1e-9) {
-                basis.add(DoubleArray(n) { i -> v[i] / norm })
+            if (rank(testMat) > basisCols.size) {
+                basisCols.add(candidate)
             }
         }
-        if (basis.size != n) return null
-        val tMat = Array(n) { row -> DoubleArray(n) { col -> basis[col][row] } }
-        val tInv = transpose(tMat) // T ортогональна => T^(-1) = T^T
-        return Triple(r, tMat, tInv)
+
+        runCatching {
+            val eigs = eigenvalues(matA)
+            for (lam in eigs) {
+                if (basisCols.size == n) break
+                if (abs(lam.im) < 1e-6) {
+                    val shifted = Array(n) { row ->
+                        DoubleArray(n) { col -> matA[row][col] - if (row == col) lam.re else 0.0 }
+                    }
+                    for (realVec in realNullspaceBasis(shifted)) {
+                        if (basisCols.size == n) break
+                        val testMat = Array(n) { row ->
+                            DoubleArray(basisCols.size + 1) { cIdx ->
+                                if (cIdx < basisCols.size) basisCols[cIdx][row] else realVec[row]
+                            }
+                        }
+                        if (rank(testMat) > basisCols.size) {
+                            basisCols.add(realVec)
+                        }
+                    }
+                }
+            }
+        }
+
+        for (k in (n - 1 downTo 0)) {
+            if (basisCols.size == n) break
+            val eVec = DoubleArray(n) { row -> if (row == k) 1.0 else 0.0 }
+            val testMat = Array(n) { row ->
+                DoubleArray(basisCols.size + 1) { cIdx ->
+                    if (cIdx < basisCols.size) basisCols[cIdx][row] else eVec[row]
+                }
+            }
+            if (rank(testMat) > basisCols.size) {
+                basisCols.add(eVec)
+            }
+        }
+
+        if (basisCols.size != n) return null
+        val sMat = Array(n) { row -> DoubleArray(n) { col -> basisCols[col][row] } }
+        val sInv = inverse(sMat) ?: return null
+        return Triple(r, sMat, sInv)
     }
 
-    /**
-     * Возвращает массив флагов для собственных значений из eigenvalues(matA):
-     * true — мода управляема (её можно переместить), false — мода неуправляема (фиксирована).
-     */
     fun getControllableModeFlags(
         matA: Array<DoubleArray>,
         matB: Array<DoubleArray>,
         allEigenvalues: List<Complex> = eigenvalues(matA)
     ): BooleanArray {
         val n = matA.size
-        val w = controllability(matA, matB)
+        val cleanB = trimZeroColsB(matB)
+        val w = controllability(matA, cleanB)
         val r = rank(w)
         if (r >= n) return BooleanArray(n) { true }
         if (r <= 0) return BooleanArray(n) { false }
 
-        val decomp = kalmanOrthogonalDecomposition(matA, matB) ?: return BooleanArray(n) { it < r }
+        val decomp = kalmanOrthogonalDecomposition(matA, cleanB) ?: return BooleanArray(n) { it < r }
         val (_, tMat, tInv) = decomp
         val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
         val aUn = Array(n - r) { i -> DoubleArray(n - r) { j -> aTilde[r + i][r + j] } }
@@ -1753,28 +1854,26 @@ class MatrixMath {
     ): Array<DoubleArray> {
         val n = matA.size
         require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной" }
-        val m = matB.firstOrNull()?.size ?: 0
-        require(matB.size == n && m >= 1 && matB.all { it.size == m }) {
+        require(matB.size == n && matB.isNotEmpty() && matB[0].isNotEmpty()) {
             "Матрица B должна иметь размерность n×m"
         }
+        val cleanB = trimZeroColsB(matB)
+        val m = cleanB[0].size
         require(desiredPoles.isNotEmpty() && desiredPoles.size <= n) {
             "Количество полюсов должно быть от 1 до $n"
         }
 
-        val wTotal = controllability(matA, matB)
+        val wTotal = controllability(matA, cleanB)
         val rTotal = rank(wTotal)
         require(rTotal > 0) { "Матрица B нулевая (rank(W_c) = 0) — управление невозможно." }
 
-        // Если m > 1 (несколько столбцов в B), сводим к эквивалентному одноканальному входу b_eff = B * g,
-        // сохраняющему максимальный ранг управляемости rTotal:
         if (m > 1) {
             var chosenG = DoubleArray(m) { 0.0 }
             var bEff = Array(n) { DoubleArray(1) }
             var foundSingle = false
 
-            // 1. Проверяем, дает ли один из столбцов B полный ранг rTotal
             for (col in 0 until m) {
-                val singleB = Array(n) { r -> doubleArrayOf(matB[r][col]) }
+                val singleB = Array(n) { r -> doubleArrayOf(cleanB[r][col]) }
                 if (rank(controllability(matA, singleB)) == rTotal) {
                     chosenG[col] = 1.0
                     bEff = singleB
@@ -1783,7 +1882,6 @@ class MatrixMath {
                 }
             }
 
-            // 2. Иначе берем комбинацию столбцов B * g, которая дает ранг rTotal
             if (!foundSingle) {
                 val candidatesG = listOf(
                     DoubleArray(m) { 1.0 },
@@ -1794,7 +1892,7 @@ class MatrixMath {
                 for (gVec in candidatesG) {
                     val testB = Array(n) { r ->
                         var s = 0.0
-                        for (c in 0 until m) s += matB[r][c] * gVec[c]
+                        for (c in 0 until m) s += cleanB[r][c] * gVec[c]
                         doubleArrayOf(s)
                     }
                     if (rank(controllability(matA, testB)) == rTotal) {
@@ -1805,8 +1903,7 @@ class MatrixMath {
                 }
             }
 
-            val kSingle = ackermann(matA, bEff, desiredPoles) // 1 × n
-            // Разворачиваем в матрицу K размера m × n: K = g * kSingle
+            val kSingle = ackermann(matA, bEff, desiredPoles)
             return Array(m) { row ->
                 DoubleArray(n) { col -> chosenG[row] * kSingle[0][col] }
             }
@@ -1824,7 +1921,7 @@ class MatrixMath {
                 coeffs = next
             }
             val cScale = max(1.0, coeffs.maxOf { it.abs() })
-            require(coeffs.all { abs(it.im) <= 1e-5 * cScale }) {
+            require(coeffs.all { abs(it.im) <= 1e-4 * cScale }) {
                 "Комплексные управляемые полюса должны образовывать сопряжённые пары!"
             }
             val realCoeffs = DoubleArray(dim + 1) { coeffs[it].re }
@@ -1848,23 +1945,24 @@ class MatrixMath {
 
         if (rTotal == n) {
             require(desiredPoles.size == n) { "Для полностью управляемой системы укажите $n полюсов" }
-            return ackermannFull(matA, matB, desiredPoles)
+            return ackermannFull(matA, cleanB, desiredPoles)
         }
 
-        val decomp = kalmanOrthogonalDecomposition(matA, matB)
+        val decomp = kalmanOrthogonalDecomposition(matA, cleanB)
             ?: throw ArithmeticException("Не удалось построить разложение Калмана")
         val (_, tMat, tInv) = decomp
 
         val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
-        val bTilde = multiply(tInv, matB)!!
+        val bTilde = multiply(tInv, cleanB)!!
 
         val ac = Array(rTotal) { i -> DoubleArray(rTotal) { j -> aTilde[i][j] } }
         val bc = Array(rTotal) { i -> DoubleArray(1) { bTilde[i][0] } }
 
         val allOpenPoles = eigenvalues(matA)
-        val ctrlFlags = getControllableModeFlags(matA, matB, allOpenPoles)
+        val ctrlFlags = getControllableModeFlags(matA, cleanB, allOpenPoles)
         val controllableTargetPoles = if (desiredPoles.size == n) {
-            desiredPoles.filterIndexed { index, _ -> ctrlFlags[index] }
+            val filtered = desiredPoles.filterIndexed { index, _ -> ctrlFlags[index] }
+            if (filtered.size == rTotal) filtered else desiredPoles.take(rTotal)
         } else {
             desiredPoles.take(rTotal)
         }
@@ -1872,5 +1970,534 @@ class MatrixMath {
         val kc = ackermannFull(ac, bc, controllableTargetPoles)
         val kTilde = Array(1) { DoubleArray(n) { j -> if (j < rTotal) kc[0][j] else 0.0 } }
         return multiply(kTilde, tInv) ?: throw ArithmeticException("Ошибка обратного преобразования K")
+    }
+
+    fun getObservableModeFlags(
+        matA: Array<DoubleArray>,
+        matC: Array<DoubleArray>,
+        allEigenvalues: List<Complex> = eigenvalues(matA)
+    ): BooleanArray {
+        val aT = transpose(matA)
+        val cleanC = trimZeroRowsC(matC)
+        val cT = transpose(cleanC)
+        return getControllableModeFlags(aT, cT, allEigenvalues)
+    }
+
+    fun luenbergerObserver(
+        matA: Array<DoubleArray>,
+        matC: Array<DoubleArray>,
+        desiredPoles: List<Complex>
+    ): Array<DoubleArray> {
+        val n = matA.size
+        require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной n×n" }
+        val aT = transpose(matA)
+        val cleanC = trimZeroRowsC(matC)
+        val cCol = Array(n) { r -> DoubleArray(1) { cleanC[0][r] } }
+        val kDual = ackermann(aT, cCol, desiredPoles)
+        return transpose(kDual)
+    }
+
+    /** Переводит десятичное число в точную обыкновенную дробь (например, -1.5 -> -3/2, -3.333 -> -10/3) */
+    private fun toCleanFractionString(v: Double): String {
+        if (!v.isFinite()) return v.toString()
+        if (abs(v) < 1e-9) return "0"
+        val roundedInt = v.roundToInt()
+        if (abs(v - roundedInt) < 1e-5) return roundedInt.toString()
+
+        val sign = if (v < 0) "-" else ""
+        val av = abs(v)
+        for (den in 2..24) {
+            val num = (av * den).roundToInt()
+            if (abs(av - num.toDouble() / den.toDouble()) < 1e-4) {
+                var a = num; var b = den
+                while (b != 0) { val t = a % b; a = b; b = t }
+                val n1 = num / a; val d1 = den / a
+                return if (d1 == 1) "$sign$n1" else "$sign$n1/$d1"
+            }
+        }
+        return String.format(Locale.US, "%.3f", v).trimEnd('0').trimEnd('.')
+    }
+
+    private fun subDigit(n: Int): String {
+        val map = charArrayOf('₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉')
+        return n.toString().map { if (it in '0'..'9') map[it - '0'] else it }.joinToString("")
+    }
+
+    fun formatMatrixAligned(m: Array<DoubleArray>): String {
+        if (m.isEmpty() || m[0].isEmpty()) return "[ пусто ]"
+        val r = m.size
+        val c = m[0].size
+        val formatted = Array(r) { i ->
+            Array(c) { j -> toCleanFractionString(m[i][j]) }
+        }
+        val colWidths = IntArray(c) { col ->
+            (0 until r).maxOf { row -> formatted[row][col].length }
+        }
+        return buildString {
+            for (i in 0 until r) {
+                val left = if (r == 1) "[" else if (i == 0) "⎡" else if (i == r - 1) "⎣" else "⎢"
+                val right = if (r == 1) "]" else if (i == 0) "⎤" else if (i == r - 1) "⎦" else "⎥"
+                append("$left ")
+                for (j in 0 until c) {
+                    append(formatted[i][j].padStart(colWidths[j]))
+                    if (j < c - 1) append("  ")
+                }
+                append(" $right")
+                if (i < r - 1) appendLine()
+            }
+        }
+    }
+
+    private fun formatControlLaw(theta: Array<DoubleArray>): String {
+        if (theta.isEmpty() || theta[0].isEmpty()) return "0"
+        val row = theta[0]
+        val terms = mutableListOf<String>()
+        for (i in row.indices) {
+            val v = row[i]
+            if (abs(v) > 1e-5) {
+                val frac = toCleanFractionString(abs(v))
+                val sign = when {
+                    v < 0 && terms.isNotEmpty() -> " − "
+                    v < 0 -> "−"
+                    terms.isNotEmpty() -> " + "
+                    else -> ""
+                }
+                val coef = if (frac == "1") "" else frac
+                terms.add("$sign${coef}x${subDigit(i + 1)}")
+            }
+        }
+        return if (terms.isEmpty()) "0" else terms.joinToString("")
+    }
+
+    /**
+     * Базис образа Im(U) в каноническом ступенчатом порядке (как в Конспекте 3, стр. 9-19).
+     */
+    fun columnSpaceBasis(m: Array<DoubleArray>): List<DoubleArray> {
+        val rows = m.size
+        val cols = m[0].size
+        val targetRank = rank(m)
+        if (targetRank == 0) return emptyList()
+        val basis = mutableListOf<DoubleArray>()
+
+        for (c in 0 until cols) {
+            if (basis.size == targetRank) break
+            val rawCol = DoubleArray(rows) { r -> m[r][c] }
+            val maxAbs = rawCol.maxOf { abs(it) }
+            if (maxAbs < 1e-9) continue
+
+            val minNZ = rawCol.filter { abs(it) > 1e-4 * maxAbs }.minByOrNull { abs(it) } ?: 1.0
+            var scale = abs(minNZ)
+            if (rawCol.count { abs(it) > 1e-4 * maxAbs } == 1) {
+                scale = rawCol.first { abs(it) > 1e-4 * maxAbs }
+            }
+            val colVec = DoubleArray(rows) { r ->
+                val v = rawCol[r] / scale
+                if (abs(v - kotlin.math.round(v)) < 1e-5) kotlin.math.round(v) else v
+            }
+            val testMat = Array(rows) { r -> DoubleArray(basis.size + 1) { idx -> if (idx < basis.size) basis[idx][r] else colVec[r] } }
+            if (rank(testMat) > basis.size) basis.add(colVec)
+        }
+        // Сортируем по индексу первой ненулевой координаты (чтобы [1,0,1]^T шёл перед [0,1,0]^T, как в Конспекте 3, задача 1б)
+        return basis.sortedBy { vec -> vec.indexOfFirst { abs(it) > 1e-6 }.let { if (it == -1) Int.MAX_VALUE else it } }
+    }
+
+    fun realNullspaceBasis(mInput: Array<DoubleArray>): List<DoubleArray> {
+        val rows = mInput.size; val cols = mInput[0].size
+        val a = Array(rows) { mInput[it].clone() }
+        val pivCols = mutableListOf<Int>(); var pivRow = 0
+        val tol = 1e-7 * a.maxOf { r -> r.maxOf { abs(it) } }.coerceAtLeast(1.0)
+
+        for (col in 0 until cols) {
+            if (pivRow >= rows) break
+            var best = pivRow
+            for (r in pivRow + 1 until rows) if (abs(a[r][col]) > abs(a[best][col])) best = r
+            if (abs(a[best][col]) <= tol) continue
+            val tmp = a[pivRow]; a[pivRow] = a[best]; a[best] = tmp
+            val pv = a[pivRow][col]
+            for (j in col until cols) a[pivRow][j] /= pv
+            for (r in 0 until rows) {
+                if (r == pivRow) continue
+                val f = a[r][col]
+                if (abs(f) > 0.0) for (j in col until cols) a[r][j] -= f * a[pivRow][j]
+            }
+            pivCols.add(col)
+            pivRow++
+        }
+        val pivSet = pivCols.toSet()
+        val freeCols = (0 until cols).filter { it !in pivSet }
+        return freeCols.map { fc ->
+            val v = DoubleArray(cols)
+            v[fc] = 1.0
+            for (idx in pivCols.indices) {
+                val pCol = pivCols[idx]
+                var s = 0.0
+                for (f in freeCols) s += a[idx][f] * v[f]
+                v[pCol] = if (abs(s) < 1e-10) 0.0 else -s
+            }
+            v
+        }
+    }
+
+    private fun isInSubspace(basis: List<DoubleArray>, v: DoubleArray): Boolean {
+        if (basis.isEmpty()) return v.all { abs(it) < 1e-9 }
+        val n = v.size
+        val m1 = Array(n) { r -> DoubleArray(basis.size) { c -> basis[c][r] } }
+        val m2 = Array(n) { r -> DoubleArray(basis.size + 1) { c -> if (c < basis.size) basis[c][r] else v[r] } }
+        return rank(m2) == rank(m1)
+    }
+
+    private fun intersectSubspaces(uBasis: List<DoubleArray>, vBasis: List<DoubleArray>, n: Int): List<DoubleArray> {
+        if (uBasis.isEmpty() || vBasis.isEmpty()) return emptyList()
+        val p = uBasis.size; val q = vBasis.size
+        val combined = Array(n) { r -> DoubleArray(p + q) { c -> if (c < p) uBasis[c][r] else -vBasis[c - p][r] } }
+        val nullVecs = realNullspaceBasis(combined)
+        val intersection = mutableListOf<DoubleArray>()
+        for (nv in nullVecs) {
+            val vec = DoubleArray(n)
+            for (i in 0 until p) for (r in 0 until n) vec[r] += nv[i] * uBasis[i][r]
+            val maxAbs = vec.maxOf { abs(it) }
+            if (maxAbs > 1e-7) {
+                val minNZ = vec.filter { abs(it) > 1e-4 * maxAbs }.minByOrNull { abs(it) } ?: 1.0
+                var scale = abs(minNZ)
+                if (vec.count { abs(it) > 1e-4 * maxAbs } == 1) scale = vec.first { abs(it) > 1e-4 * maxAbs }
+                val normV = DoubleArray(n) { r ->
+                    val valScaled = vec[r] / scale
+                    if (abs(valScaled - kotlin.math.round(valScaled)) < 1e-4) kotlin.math.round(valScaled) else valScaled
+                }
+                if (!isInSubspace(intersection, normV)) intersection.add(normV)
+            }
+        }
+        return intersection
+    }
+
+    /**
+     * Полный пошаговый разбор строго по блок-схеме и тетрадям (Конспекты 1, 2 и 3).
+     */
+    fun fullBlockDiagramAnalysis(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>,
+        matC: Array<DoubleArray>
+    ): String {
+        val n = matA.size
+        val hasA = matA.any { row -> row.any { abs(it) > 1e-12 } }
+        val hasB = matB.any { row -> row.any { abs(it) > 1e-12 } }
+        val hasC = matC.any { row -> row.any { abs(it) > 1e-12 } }
+
+        if (!hasA) return "Вывод: матрица A не введена.\nВведите матрицу состояния A (${n}×$n)."
+
+        val eigs = eigenvalues(matA)
+        val eigStr = eigs.mapIndexed { i, c -> "λ${i + 1} = $c" }.joinToString(", ")
+
+        if (!hasB && !hasC) {
+            return buildString {
+                appendLine("АВТОНОМНАЯ СИСТЕМА: x' = Ax")
+                appendLine("Вывод: матрицы B и C не введены.")
+                appendLine()
+                appendLine("Собственные числа матрицы A:")
+                append("λ = { $eigStr }")
+            }
+        }
+
+        return buildString {
+            val cleanB = if (hasB) trimZeroColsB(matB) else matB
+            val cleanC = if (hasC) trimZeroRowsC(matC) else matC
+
+            appendLine("СИСТЕМА В ПРОСТРАНСТВЕ СОСТОЯНИЙ:")
+            when {
+                hasB && hasC -> {
+                    appendLine("⎧ x' = Ax + Bu   (A: ${n}×$n, B: ${cleanB.size}×${cleanB[0].size})")
+                    appendLine("⎩ y  = Cx        (C: ${cleanC.size}×${cleanC[0].size})")
+                }
+                hasB && !hasC -> appendLine("x' = Ax + Bu   (A: ${n}×$n, B: ${cleanB.size}×${cleanB[0].size})")
+                else -> {
+                    appendLine("⎧ x' = Ax")
+                    appendLine("⎩ y  = Cx   (A: ${n}×$n, C: ${cleanC.size}×${cleanC[0].size})")
+                }
+            }
+            appendLine()
+            appendLine("Собственные числа матрицы A:")
+            appendLine("λ = { $eigStr }")
+            appendLine("════════════════════════════════")
+
+            var isFullCtrl = false
+            var isStabilizable = false
+            var rankC = 0
+            var wcMat: Array<DoubleArray>? = null
+
+            var isFullObs = false
+            var isDetectable = false
+            var rankO = 0
+            var woMat: Array<DoubleArray>? = null
+
+            // =========================================================
+            // 1) ПРОВЕРКА УПРАВЛЯЕМОСТИ И РАЗЛОЖЕНИЕ НА ПОДПРОСТРАНСТВА
+            // =========================================================
+            if (hasB) {
+                appendLine("1) ПРОВЕРКА УПРАВЛЯЕМОСТИ:")
+                val wc = controllability(matA, cleanB)
+                wcMat = wc
+                rankC = rank(wc)
+                isFullCtrl = (rankC == n)
+
+                appendLine("Матрица управляемости C(A,B) = U = [B, AB, A²B, ...]:")
+                appendLine(formatMatrixAligned(wc))
+                if (wc.size == wc[0].size) {
+                    val detU = determinant(wc) ?: 0.0
+                    appendLine("det(U) = ${String.format(Locale.US, "%.3f", detU).trimEnd('0').trimEnd('.')}")
+                }
+                appendLine("rank(U) = $rankC (при n = $n)")
+
+                if (isFullCtrl) {
+                    isStabilizable = true
+                    appendLine("➔ Вывод: система полностью управляема. Регулятор построить можно.")
+                } else {
+                    appendLine("➔ Вывод: система не является полностью управляемой.")
+                    appendLine("• Управляемое подпространство: dim = $rankC")
+                    appendLine("• Неуправляемое подпространство: dim = ${n - rankC}")
+                    appendLine()
+                    appendLine("Построим разложение Калмана на управляемое и неуправляемое подпространства:")
+
+                    val kd = kalmanNotebookDecomposition(matA, cleanB)
+                    if (kd != null) {
+                        val (r, sMat, sInv) = kd
+                        val aTilde = multiply(multiply(sInv, matA)!!, sMat)!!
+                        val bTilde = multiply(sInv, cleanB)!!
+                        val aCtrl = Array(r) { i -> DoubleArray(r) { j -> aTilde[i][j] } }
+                        val aUn = Array(n - r) { i -> DoubleArray(n - r) { j -> aTilde[r + i][r + j] } }
+                        val unEigs = eigenvalues(aUn)
+                        isStabilizable = unEigs.all { it.re < -1e-7 }
+
+                        appendLine("Матрица преобразования S:")
+                        appendLine(formatMatrixAligned(sMat))
+                        appendLine("Обратная матрица S⁻¹:")
+                        appendLine(formatMatrixAligned(sInv))
+                        appendLine("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:")
+                        appendLine(formatMatrixAligned(aTilde))
+                        appendLine("Новая матрица B̃ = S⁻¹ B:")
+                        appendLine(formatMatrixAligned(bTilde))
+                        appendLine("Управляемая часть Ac (${r}×$r):")
+                        appendLine(formatMatrixAligned(aCtrl))
+                        appendLine("Неуправляемая часть Au (${n - r}×${n - r}):")
+                        appendLine(formatMatrixAligned(aUn))
+                        appendLine("Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.joinToString(", ")} }")
+
+                        if (isStabilizable) {
+                            appendLine("➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).")
+                            appendLine("➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно.")
+                        } else {
+                            appendLine("➔ Есть собственные числа неуправляемой части с Re(λ) ≥ 0 (неуправляемая часть неустойчива).")
+                            appendLine("➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.")
+                        }
+                    }
+                }
+                appendLine("════════════════════════════════")
+            }
+
+            // =========================================================
+            // 2) ПРОВЕРКА НАБЛЮДАЕМОСТИ И ДЕТЕКТИРУЕМОСТИ
+            // =========================================================
+            if (hasC) {
+                appendLine(if (hasB) "2) ПРОВЕРКА НАБЛЮДАЕМОСТИ:" else "1) ПРОВЕРКА НАБЛЮДАЕМОСТИ:")
+                val wo = observability(matA, cleanC)
+                woMat = wo
+                rankO = rank(wo)
+                isFullObs = (rankO == n)
+
+                appendLine("Матрица наблюдаемости O = [C; CA; CA²; ...]:")
+                appendLine(formatMatrixAligned(wo))
+                appendLine("rank(O) = $rankO (при n = $n)")
+
+                if (isFullObs) {
+                    isDetectable = true
+                    appendLine("➔ Вывод: система полностью наблюдаема. Наблюдатель построить можно.")
+                } else {
+                    appendLine("➔ Вывод: система не является полностью наблюдаемой.")
+                    appendLine("• Наблюдаемое подпространство: dim = $rankO")
+                    appendLine("• Ненаблюдаемое подпространство: dim = ${n - rankO}")
+                    appendLine()
+                    appendLine("Проверка на детектируемость (разложение на наблюдаемое и ненаблюдаемое подпространства):")
+
+                    val aT = transpose(matA); val cT = transpose(cleanC)
+                    val kdObs = kalmanNotebookDecomposition(aT, cT)
+                    if (kdObs != null) {
+                        val (rObs, tMatDual, tInvDual) = kdObs
+                        val aTildeDual = multiply(multiply(tInvDual, aT)!!, tMatDual)!!
+                        val aUnObs = Array(n - rObs) { i -> DoubleArray(n - rObs) { j -> aTildeDual[rObs + i][rObs + j] } }
+                        val unObsEigs = eigenvalues(aUnObs)
+                        isDetectable = unObsEigs.all { it.re < -1e-7 }
+
+                        val tObs = transpose(tInvDual); val tObsInv = transpose(tMatDual)
+                        val aTildeObs = multiply(multiply(tObsInv, matA)!!, tObs)!!
+                        val cTildeObs = multiply(cleanC, tObs)!!
+
+                        appendLine("Матрица перехода T_o:")
+                        appendLine(formatMatrixAligned(tObs))
+                        appendLine("Обратная матрица T_o⁻¹:")
+                        appendLine(formatMatrixAligned(tObsInv))
+                        appendLine("Матрица Ã_o = T_o⁻¹ A T_o:")
+                        appendLine(formatMatrixAligned(aTildeObs))
+                        appendLine("Матрица C̃_o = C T_o:")
+                        appendLine(formatMatrixAligned(cTildeObs))
+                        appendLine("Собственные числа ненаблюдаемой части: λ = { ${unObsEigs.joinToString(", ")} }")
+
+                        if (isDetectable) {
+                            appendLine("➔ Ненаблюдаемая часть устойчива (Re(λ) < 0).")
+                            appendLine("➔ Вывод: система ДЕТЕКТИРУЕМА. Наблюдатель построить можно.")
+                        } else {
+                            appendLine("➔ Ненаблюдаемая часть неустойчива (есть Re(λ) ≥ 0).")
+                            appendLine("➔ Вывод: система НЕ ДЕТЕКТИРУЕМА. Наблюдатель построить нельзя.")
+                        }
+                    }
+                }
+                appendLine("════════════════════════════════")
+            }
+
+            // =========================================================
+            // 3) ПОЛНОЕ 4-БЛОЧНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T1, T2, T3, T4]
+            // =========================================================
+            if (hasB && hasC && (!isFullCtrl || !isFullObs) && wcMat != null && woMat != null) {
+                appendLine("3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T₁ T₂ T₃ T₄] (Конспект 3):")
+                val imU = columnSpaceBasis(wcMat)
+                val kerO = realNullspaceBasis(woMat)
+                val t2 = intersectSubspaces(imU, kerO, n)
+
+                val t1 = mutableListOf<DoubleArray>()
+                for (vec in imU) if (!isInSubspace(t2 + t1, vec)) t1.add(vec)
+
+                val t4 = mutableListOf<DoubleArray>()
+                for (vec in kerO) if (!isInSubspace(t2 + t4, vec)) t4.add(vec)
+
+                val t3 = mutableListOf<DoubleArray>()
+                for (k in 0 until n) {
+                    if ((t1.size + t2.size + t3.size + t4.size) >= n) break
+                    val eVec = DoubleArray(n) { r -> if (r == k) 1.0 else 0.0 }
+                    if (!isInSubspace(t1 + t2 + t4 + t3, eVec)) t3.add(eVec)
+                }
+
+                fun fmt(l: List<DoubleArray>) = if (l.isEmpty()) "∅ (нет)" else l.joinToString(", ") { v ->
+                    "[" + v.joinToString("; ") { x ->
+                        if (abs(x - kotlin.math.round(x)) < 1e-5) kotlin.math.round(x).toLong().toString()
+                        else String.format(Locale.US, "%.3f", x)
+                    } + "]ᵀ"
+                }
+
+                appendLine("1. Образ Im U(A,B) = span{ ${fmt(imU)} }")
+                appendLine("2. Ядро Ker O(A,C) = span{ ${fmt(kerO)} }")
+                appendLine("3. Пересечение Im U ∩ Ker O (T₂ — упр., ненабл.): ${fmt(t2)}")
+                appendLine("4. Блок T₁ (упр., набл.): ${fmt(t1)}")
+                appendLine("5. Блок T₄ (неупр., ненабл.): ${fmt(t4)}")
+                appendLine("6. Блок T₃ (неупр., набл.): ${fmt(t3)}")
+
+                val allCols = t1 + t2 + t3 + t4
+                if (allCols.size == n) {
+                    val tFull = Array(n) { r -> DoubleArray(n) { c -> allCols[c][r] } }
+                    val tFullInv = inverse(tFull)
+                    if (tFullInv != null) {
+                        val aHat = multiply(multiply(tFullInv, matA)!!, tFull)!!
+                        val bHat = multiply(tFullInv, cleanB)!!
+                        val cHat = multiply(cleanC, tFull)!!
+                        appendLine("Матрица замены T = [T₁ T₂ T₃ T₄]:")
+                        appendLine(formatMatrixAligned(tFull))
+                        appendLine("Обратная матрица T⁻¹:")
+                        appendLine(formatMatrixAligned(tFullInv))
+                        appendLine("Матрица Â = T⁻¹ A T:")
+                        appendLine(formatMatrixAligned(aHat))
+                        appendLine("Матрица B̂ = T⁻¹ B:")
+                        appendLine(formatMatrixAligned(bHat))
+                        appendLine("Матрица Ĉ = C T:")
+                        appendLine(formatMatrixAligned(cHat))
+                    }
+                }
+                appendLine("════════════════════════════════")
+            }
+
+            // =========================================================
+            // 4) ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ И СИНТЕЗ
+            // =========================================================
+            if (hasB && hasC) {
+                appendLine("ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ:")
+                when {
+                    isFullCtrl && isFullObs ->
+                        appendLine("Вывод: система полностью управляема и наблюдаема.\nРегулятор и наблюдатель построить можно.")
+                    isFullCtrl && !isFullObs && isDetectable ->
+                        appendLine("Вывод: система полностью управляема и детектируема.\nРегулятор и наблюдатель построить можно.")
+                    isFullCtrl && !isFullObs && !isDetectable ->
+                        appendLine("Вывод: система полностью управляема, но не детектируема.\nРегулятор построить можно. Наблюдатель построить нельзя.")
+                    !isFullCtrl && isFullObs && isStabilizable ->
+                        appendLine("Вывод: система полностью наблюдаема и стабилизируема.\nНаблюдатель и регулятор построить можно.")
+                    !isFullCtrl && isFullObs && !isStabilizable ->
+                        appendLine("Вывод: система полностью наблюдаема, но не стабилизируема.\nНаблюдатель построить можно. Регулятор построить нельзя.")
+                    else -> {
+                        val rTxt = if (isStabilizable) "Система стабилизируема (регулятор построить можно)." else "Система не стабилизируема (регулятор построить нельзя)."
+                        val oTxt = if (isDetectable) "Система детектируема (наблюдатель построить можно)." else "Система не детектируема (наблюдатель построить нельзя)."
+                        appendLine("Вывод: система не является полностью управляемой и наблюдаемой.\n• $rTxt\n• $oTxt")
+                    }
+                }
+                appendLine("════════════════════════════════")
+            }
+
+            if (hasB && isStabilizable) {
+                try {
+                    val flags = getControllableModeFlags(matA, cleanB, eigs)
+                    val usedReals = eigs.map { it.re }.toMutableList()
+                    var nextNeg = -1.0
+
+                    val targetPoles = List(n) { idx ->
+                        val orig = eigs[idx]
+                        if (!flags[idx] || orig.re < -1e-5) orig
+                        else if (abs(orig.im) < 1e-5 && orig.re > 1e-5 && usedReals.none { abs(it + orig.re) < 1e-4 }) {
+                            usedReals.add(-orig.re)
+                            Complex(-orig.re, 0.0)
+                        } else {
+                            while (usedReals.any { abs(it - nextNeg) < 1e-4 } && abs(orig.im) < 1e-5) nextNeg -= 1.0
+                            val p = Complex(nextNeg, 0.0)
+                            nextNeg -= 1.0
+                            p
+                        }
+                    }
+
+                    val kAuto = ackermann(matA, cleanB, targetPoles)
+                    val thetaAuto = multiplyScalar(kAuto, -1.0)
+                    val clSpec = eigenvalues(subtract(matA, multiply(cleanB, kAuto)!!)!!)
+
+                    appendLine("ПОСТРОЕНИЕ РЕГУЛЯТОРА:")
+                    appendLine("Целевые полюса управляемых мод: ${targetPoles.filterIndexed { i, _ -> flags[i] }.joinToString(", ")}")
+                    appendLine("Спектр замкнутой системы: { ${clSpec.joinToString(", ")} }")
+                    appendLine()
+                    appendLine("Матрица K (для u = −Kx):")
+                    appendLine(formatMatrixAligned(kAuto))
+                    appendLine("Матрица Θ = −K (для u = Θx, как в конспекте):")
+                    appendLine(formatMatrixAligned(thetaAuto))
+                    appendLine()
+                    appendLine("Закон управления:")
+                    appendLine("u = Θx = ${formatControlLaw(thetaAuto)}")
+                } catch (e: Exception) {
+                    appendLine("⚠️ Ошибка расчёта регулятора K: ${e.message}")
+                }
+                appendLine("════════════════════════════════")
+            }
+
+            if (hasC && isDetectable) {
+                try {
+                    val cRow = Array(1) { DoubleArray(n) { col -> cleanC[0][col] } }
+                    val flags = getObservableModeFlags(matA, cRow, eigs)
+                    var step = 2
+                    val targetObsPoles = List(n) { idx ->
+                        if (!flags[idx] || eigs[idx].re < -1e-5) eigs[idx] else Complex(-(step++).toDouble(), 0.0)
+                    }
+                    val lAuto = luenbergerObserver(matA, cRow, targetObsPoles)
+                    val obsClSpec = eigenvalues(subtract(matA, multiply(lAuto, cRow)!!)!!)
+
+                    appendLine("ПОСТРОЕНИЕ НАБЛЮДАТЕЛЯ:")
+                    appendLine("Целевые полюса наблюдаемых мод: ${targetObsPoles.filterIndexed { i, _ -> flags[i] }.joinToString(", ")}")
+                    appendLine("Спектр ошибки наблюдения: { ${obsClSpec.joinToString(", ")} }")
+                    appendLine()
+                    appendLine("Матрица L (${n}×1):")
+                    appendLine(formatMatrixAligned(lAuto))
+                } catch (e: Exception) {
+                    appendLine("⚠️ Ошибка расчёта наблюдателя L: ${e.message}")
+                }
+            }
+        }
     }
 }

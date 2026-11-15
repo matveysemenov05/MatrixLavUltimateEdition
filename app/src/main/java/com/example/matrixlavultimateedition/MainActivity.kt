@@ -158,7 +158,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppSwitcher() {
     val context = LocalContext.current
-    var appMode by rememberSaveable { mutableIntStateOf(0) }
+    val configuration = LocalConfiguration.current
+    val math = remember { MatrixMath() }
+    val screenWidth = configuration.screenWidthDp.dp
+    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Главный режим: 0 = ⚡ Алгебра (независимые размеры A, B, C), 1 = 🎛 ТАУ, Спектр и f(A) (A: n×n, B: n×m, C: k×n)
+    var mainTab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedMatrixTab by rememberSaveable { mutableIntStateOf(0) } // 0 = A, 1 = B, 2 = C
 
     val historyList = remember { mutableStateListOf<HistoryItem>() }
     LaunchedEffect(Unit) { historyList.addAll(HistoryStorage.loadHistory(context)) }
@@ -176,21 +184,239 @@ fun MainAppSwitcher() {
 
     var showHistorySheet by remember { mutableStateOf(false) }
 
-    var squareSize by rememberSaveable { mutableIntStateOf(3) }
-    var squareSelectedTab by rememberSaveable { mutableIntStateOf(0) }
-    var squareMatrixA by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
-    var squareMatrixB by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
-    var squareMatrixC by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
-    var squareScalarK by rememberSaveable { mutableStateOf("1") }
+    // --- СОСТОЯНИЕ РАЗДЕЛА 0: "АЛГЕБРА" (Каждая матрица A, B, C регулируется отдельно M×N от 1 до 7) ---
+    var algRowsA by rememberSaveable { mutableIntStateOf(3) }
+    var algColsA by rememberSaveable { mutableIntStateOf(3) }
+    var algRowsB by rememberSaveable { mutableIntStateOf(3) }
+    var algColsB by rememberSaveable { mutableIntStateOf(3) }
+    var algRowsC by rememberSaveable { mutableIntStateOf(3) }
+    var algColsC by rememberSaveable { mutableIntStateOf(3) }
 
-    var rectSelectedTab by rememberSaveable { mutableIntStateOf(0) }
-    var rectRowsA by rememberSaveable { mutableIntStateOf(2) }
-    var rectColsA by rememberSaveable { mutableIntStateOf(3) }
-    var rectMatrixA by rememberSaveable { mutableStateOf(List(2) { List(3) { "0" } }) }
-    var rectRowsB by rememberSaveable { mutableIntStateOf(3) }
-    var rectColsB by rememberSaveable { mutableIntStateOf(2) }
-    var rectMatrixB by rememberSaveable { mutableStateOf(List(3) { List(2) { "0" } }) }
-    var rectScalarK by rememberSaveable { mutableStateOf("1") }
+    // --- СОСТОЯНИЕ РАЗДЕЛА 1: "ТАУ, СПЕКТР И f(A)" (A: n×n, B: n×m, C: k×n) ---
+    var tauN by rememberSaveable { mutableIntStateOf(3) } // Размерность состояния n (2..7)
+    var tauM by rememberSaveable { mutableIntStateOf(1) } // Число столбцов (входов) B: m (1..7)
+    var tauK by rememberSaveable { mutableIntStateOf(1) } // Число строк (выходов) C: k (1..7)
+
+    // Единые хранилища данных матриц A, B, C (при переключении вкладок данные сохраняются и адаптируются по размеру)
+    var matrixA by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var matrixB by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var matrixC by rememberSaveable { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var scalarK by rememberSaveable { mutableStateOf("1") }
+
+    // Актуальные размеры для текущего выбранного режима
+    val curRowsA = if (mainTab == 0) algRowsA else tauN
+    val curColsA = if (mainTab == 0) algColsA else tauN
+    val curRowsB = if (mainTab == 0) algRowsB else tauN
+    val curColsB = if (mainTab == 0) algColsB else tauM
+    val curRowsC = if (mainTab == 0) algRowsC else tauK
+    val curColsC = if (mainTab == 0) algColsC else tauN
+
+    // Автоматическая подгонка списков при изменении размеров
+    val viewA = remember(matrixA, curRowsA, curColsA) { resizeMatrix(matrixA, curRowsA, curColsA) }
+    val viewB = remember(matrixB, curRowsB, curColsB) { resizeMatrix(matrixB, curRowsB, curColsB) }
+    val viewC = remember(matrixC, curRowsC, curColsC) { resizeMatrix(matrixC, curRowsC, curColsC) }
+
+    val activeRows = when (selectedMatrixTab) { 0 -> curRowsA; 1 -> curRowsB; else -> curRowsC }
+    val activeCols = when (selectedMatrixTab) { 0 -> curColsA; 1 -> curColsB; else -> curColsC }
+    val activeData = when (selectedMatrixTab) { 0 -> viewA; 1 -> viewB; else -> viewC }
+    val activeAccent = when (selectedMatrixTab) { 0 -> AccentCyan; 1 -> AccentPurple; else -> AccentAmber }
+    val tabName = when (selectedMatrixTab) { 0 -> "A"; 1 -> "B"; else -> "C" }
+
+    fun updateActiveMatrix(updated: List<List<String>>) {
+        when (selectedMatrixTab) {
+            0 -> matrixA = updated
+            1 -> matrixB = updated
+            else -> matrixC = updated
+        }
+    }
+
+    fun setMatrixDimensions(targetTab: Int, newR: Int, newC: Int) {
+        val r = newR.coerceIn(1, 7)
+        val c = newC.coerceIn(1, 7)
+        if (mainTab == 0) {
+            when (targetTab) {
+                0 -> { algRowsA = r; algColsA = c; matrixA = resizeMatrix(matrixA, r, c) }
+                1 -> { algRowsB = r; algColsB = c; matrixB = resizeMatrix(matrixB, r, c) }
+                else -> { algRowsC = r; algColsC = c; matrixC = resizeMatrix(matrixC, r, c) }
+            }
+        } else {
+            when (targetTab) {
+                0 -> {
+                    val n = r.coerceIn(2, 7)
+                    tauN = n
+                    matrixA = resizeMatrix(matrixA, n, n)
+                    matrixB = resizeMatrix(matrixB, n, tauM)
+                    matrixC = resizeMatrix(matrixC, tauK, n)
+                }
+                1 -> {
+                    val n = r.coerceIn(2, 7)
+                    tauN = n; tauM = c
+                    matrixA = resizeMatrix(matrixA, n, n)
+                    matrixB = resizeMatrix(matrixB, n, tauM)
+                    matrixC = resizeMatrix(matrixC, tauK, n)
+                }
+                else -> {
+                    val n = c.coerceIn(2, 7)
+                    tauK = r; tauN = n
+                    matrixA = resizeMatrix(matrixA, n, n)
+                    matrixB = resizeMatrix(matrixB, n, tauM)
+                    matrixC = resizeMatrix(matrixC, tauK, n)
+                }
+            }
+        }
+    }
+
+    // Состояние карточки результата
+    var lastResultTitle by remember { mutableStateOf("Результат") }
+    var lastResultMatrix by remember { mutableStateOf<Array<DoubleArray>?>(null) }
+    var lastResultGrid by remember { mutableStateOf<List<List<String>>?>(null) }
+    var resultScalarText by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
+
+    fun scrollToBottom() {
+        coroutineScope.launch {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
+
+    fun showMatrixResult(result: Array<DoubleArray>?, operationName: String) {
+        lastResultTitle = operationName
+        lastResultGrid = null
+
+        if (result == null) {
+            lastResultMatrix = null
+            resultScalarText = "Не удалось выполнить операцию \"$operationName\".\nПроверьте размеры матриц и допустимость операции."
+            isError = true
+            scrollToBottom()
+            return
+        }
+        if (result.any { row -> row.any { !it.isFinite() } }) {
+            lastResultMatrix = null
+            resultScalarText = "Ошибка вычисления \"$operationName\".\nРезультат содержит NaN или бесконечность."
+            isError = true
+            scrollToBottom()
+            return
+        }
+
+        lastResultMatrix = result
+        resultScalarText = ""
+        isError = false
+        addHistoryItem(HistoryItem(title = operationName, resultText = formatMatrixRaw(result), resultMatrix = result))
+        scrollToBottom()
+    }
+
+    fun transferResultToTarget(targetIdx: Int, mat: Array<DoubleArray>) {
+        if (mat.isEmpty() || mat[0].isEmpty()) return
+        val r = mat.size.coerceIn(1, 7)
+        val c = mat[0].size.coerceIn(1, 7)
+        val strGrid = matrixToPreciseStringList(mat)
+        val name = listOf("A", "B", "C")[targetIdx]
+
+        if (mainTab == 0) {
+            setMatrixDimensions(targetIdx, r, c)
+            when (targetIdx) {
+                0 -> matrixA = resizeMatrix(strGrid, r, c)
+                1 -> matrixB = resizeMatrix(strGrid, r, c)
+                else -> matrixC = resizeMatrix(strGrid, r, c)
+            }
+            selectedMatrixTab = targetIdx
+            Toast.makeText(context, "Перенесено в $name (${r}×$c)", Toast.LENGTH_SHORT).show()
+        } else {
+            when (targetIdx) {
+                0 -> {
+                    // В ТАУ матрица A всегда квадратная n×n: берем n по большему измерению (от 2 до 7)
+                    val n = maxOf(r, c).coerceIn(2, 7)
+                    tauN = n
+                    matrixA = resizeMatrix(strGrid, n, n)
+                    matrixB = resizeMatrix(matrixB, n, tauM)
+                    matrixC = resizeMatrix(matrixC, tauK, n)
+                    selectedMatrixTab = 0
+                    Toast.makeText(context, "Перенесено в A (${n}×$n)", Toast.LENGTH_SHORT).show()
+                }
+                1 -> {
+                    // В ТАУ матрица B имеет размер n×m: если r in 2..7, подстраиваем и n, и число столбцов m = c!
+                    if (r in 2..7 && r != tauN) {
+                        tauN = r
+                        matrixA = resizeMatrix(matrixA, tauN, tauN)
+                        matrixC = resizeMatrix(matrixC, tauK, tauN)
+                    }
+                    tauM = c.coerceIn(1, 7)
+                    matrixB = resizeMatrix(strGrid, tauN, tauM)
+                    selectedMatrixTab = 1
+                    Toast.makeText(context, "Перенесено в B (${tauN}×$tauM)", Toast.LENGTH_SHORT).show()
+                }
+                else -> {
+                    // В ТАУ матрица C имеет размер k×n: если c in 2..7, подстраиваем и n, и число строк k = r!
+                    if (c in 2..7 && c != tauN) {
+                        tauN = c
+                        matrixA = resizeMatrix(matrixA, tauN, tauN)
+                        matrixB = resizeMatrix(matrixB, tauN, tauM)
+                    }
+                    tauK = r.coerceIn(1, 7)
+                    matrixC = resizeMatrix(strGrid, tauK, tauN)
+                    selectedMatrixTab = 2
+                    Toast.makeText(context, "Перенесено в C (${tauK}×$tauN)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Состояния модальных окон (Степень, Фробениус, Модальное управление, LQR)
+    var showPowerDialog by remember { mutableStateOf(false) }
+    var powerInput by remember { mutableStateOf("3") }
+
+    var showFrobeniusDialog by remember { mutableStateOf(false) }
+    var frobSize by rememberSaveable { mutableIntStateOf(3) }
+    var frobA by remember { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var frobB by remember { mutableStateOf(List(3) { listOf("0") }) }
+
+    var showPolesDialog by remember { mutableStateOf(false) }
+    var designSize by rememberSaveable { mutableIntStateOf(3) }
+    var designA by remember { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var designB by remember { mutableStateOf(List(3) { listOf("0") }) }
+    var poleAssignments by remember { mutableStateOf(List(3) { "-1" }) }
+
+    var showLqrDialog by remember { mutableStateOf(false) }
+    var showFlowDialog by remember { mutableStateOf(false) }
+    var flowUseB by remember { mutableStateOf(true) }
+    var flowUseC by remember { mutableStateOf(true) }
+    var lqrN by rememberSaveable { mutableIntStateOf(3) }
+    var lqrM by rememberSaveable { mutableIntStateOf(1) }
+    var lqrAInput by remember { mutableStateOf(List(3) { List(3) { "0" } }) }
+    var lqrBInput by remember { mutableStateOf(List(3) { listOf("0") }) }
+    var lqrQInput by remember { mutableStateOf(identityStringGrid(3)) }
+    var lqrRInput by remember { mutableStateOf(identityStringGrid(1)) }
+
+    // Мгновенная синхронизация диалогов ТАУ с основным экраном
+    fun syncTauDialogToMain(newN: Int, newA: List<List<String>>, newB: List<List<String>>, newQ: List<List<String>>? = null) {
+        val n = newN.coerceIn(2, 7)
+        tauN = n
+        algRowsA = n; algColsA = n
+        matrixA = resizeMatrix(newA, n, n)
+        val bCols = (newB.firstOrNull()?.size ?: 1).coerceIn(1, 7)
+        if (bCols > tauM) tauM = bCols
+        val mergedB = List(n) { r ->
+            List(tauM) { c ->
+                if (r < newB.size && c < newB[r].size) newB[r][c]
+                else matrixB.getOrNull(r)?.getOrNull(c) ?: "0"
+            }
+        }
+        matrixB = mergedB
+        algRowsB = n; algColsB = tauM
+        if (newQ != null) {
+            matrixC = resizeMatrix(newQ, tauK.coerceAtLeast(n), n)
+        } else {
+            matrixC = resizeMatrix(matrixC, tauK, n)
+        }
+    }
+
+    val calculatedCellSize = ((screenWidth - 44.dp) / activeCols.coerceAtLeast(2)).coerceIn(44.dp, 62.dp)
+    val cellFontSize = when {
+        activeCols >= 6 -> 11.sp
+        activeCols >= 5 -> 12.sp
+        calculatedCellSize < 54.dp -> 13.sp
+        else -> 16.sp
+    }
 
     Box(
         modifier = Modifier
@@ -205,6 +431,7 @@ fun MainAppSwitcher() {
         ) {
             Spacer(modifier = Modifier.height(14.dp))
 
+            // --- ШАПКА ПРИЛОЖЕНИЯ ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -221,7 +448,7 @@ fun MainAppSwitcher() {
                         color = TextWhite
                     )
                     Text(
-                        text = "THEORY OF CONTROL • PRO EDITION",
+                        text = "ALGEBRA & THEORY OF CONTROL • PRO",
                         fontSize = 10.sp,
                         color = AccentCyan,
                         fontWeight = FontWeight.Bold,
@@ -246,79 +473,962 @@ fun MainAppSwitcher() {
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // --- 2 ГЛАВНЫЕ ВКЛАДКИ: "⚡ Алгебра" и "🎛 ТАУ, Спектр и f(A)" ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(CardDark)
-                    .padding(4.dp)
+                    .border(1.dp, Color(0xFF24334D), RoundedCornerShape(14.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                TabButton("Квадратные (A, B, C)", appMode == 0, Modifier.weight(1f)) { appMode = 0 }
-                TabButton("Прямоугольные / Векторы", appMode == 1, Modifier.weight(1f)) { appMode = 1 }
+                CategoryPill("⚡ Алгебра и Векторы", mainTab == 0, AccentCyan, Modifier.weight(1f)) {
+                    mainTab = 0
+                }
+                CategoryPill("🎛 ТАУ, Спектр и f(A)", mainTab == 1, AccentPurple, Modifier.weight(1.1f)) {
+                    mainTab = 1
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            AnimatedContent(
-                targetState = appMode,
-                transitionSpec = {
-                    if (targetState > initialState) {
-                        (slideInHorizontally { width -> width / 2 } + fadeIn()).togetherWith(
-                            slideOutHorizontally { width -> -width / 2 } + fadeOut()
-                        )
-                    } else {
-                        (slideInHorizontally { width -> -width / 2 } + fadeIn()).togetherWith(
-                            slideOutHorizontally { width -> width / 2 } + fadeOut()
-                        )
-                    }
-                },
-                label = "ScreenTransition"
-            ) { mode ->
-                if (mode == 0) {
-                    SquareMatricesScreen(
-                        size = squareSize,
-                        onSizeChange = { newSize ->
-                            if (newSize in 2..7) {
-                                squareSize = newSize
-                                squareMatrixA = resizeMatrix(squareMatrixA, newSize, newSize)
-                                squareMatrixB = resizeMatrix(squareMatrixB, newSize, newSize)
-                                squareMatrixC = resizeMatrix(squareMatrixC, newSize, newSize)
-                            }
-                        },
-                        selectedTab = squareSelectedTab,
-                        onTabChange = { squareSelectedTab = it },
-                        matrixA = squareMatrixA, onMatrixAChange = { squareMatrixA = it },
-                        matrixB = squareMatrixB, onMatrixBChange = { squareMatrixB = it },
-                        matrixC = squareMatrixC, onMatrixCChange = { squareMatrixC = it },
-                        scalarK = squareScalarK, onScalarKChange = { squareScalarK = it },
-                        onAddToHistory = { addHistoryItem(it) }
-                    )
-                } else {
-                    RectangularMatricesScreen(
-                        selectedTab = rectSelectedTab,
-                        onTabChange = { rectSelectedTab = it },
-                        rowsA = rectRowsA, colsA = rectColsA,
-                        onSizeAChange = { r, c ->
-                            if (r in 1..7 && c in 1..7) {
-                                rectRowsA = r; rectColsA = c; rectMatrixA = resizeMatrix(rectMatrixA, r, c)
-                            }
-                        },
-                        matrixA = rectMatrixA, onMatrixAChange = { rectMatrixA = it },
-                        rowsB = rectRowsB, colsB = rectColsB,
-                        onSizeBChange = { r, c ->
-                            if (r in 1..7 && c in 1..7) {
-                                rectRowsB = r; rectColsB = c; rectMatrixB = resizeMatrix(rectMatrixB, r, c)
-                            }
-                        },
-                        matrixB = rectMatrixB, onMatrixBChange = { rectMatrixB = it },
-                        scalarK = rectScalarK, onScalarKChange = { rectScalarK = it },
-                        onAddToHistory = { addHistoryItem(it) }
-                    )
+            // --- ОСНОВНОЙ ПРОКРУЧИВАЕМЫЙ ЭКРАН ---
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // ВЕРХНЯЯ ПАНЕЛЬ ВЫБОРА МАТРИЦЫ A / B / C С ИХ АКТУАЛЬНЫМИ РАЗМЕРАМИ
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(CardDark)
+                        .padding(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MatrixSelectChip(
+                        text = "A (${curRowsA}×$curColsA)",
+                        selected = selectedMatrixTab == 0,
+                        accent = AccentCyan,
+                        modifier = Modifier.weight(1f)
+                    ) { selectedMatrixTab = 0 }
+
+                    MatrixSelectChip(
+                        text = "B (${curRowsB}×$curColsB)",
+                        selected = selectedMatrixTab == 1,
+                        accent = AccentPurple,
+                        modifier = Modifier.weight(1f)
+                    ) { selectedMatrixTab = 1 }
+
+                    MatrixSelectChip(
+                        text = "C (${curRowsC}×$curColsC)",
+                        selected = selectedMatrixTab == 2,
+                        accent = AccentAmber,
+                        modifier = Modifier.weight(1f)
+                    ) { selectedMatrixTab = 2 }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // --- БЛОК УПРАВЛЕНИЯ РАЗМЕРНОСТЬЮ (ЗАВИСИТ ОТ ВКЛАДКИ "АЛГЕБРА" ИЛИ "ТАУ") ---
+                if (mainTab == 0) {
+                    // Динамический базовый размер d (подстраивается под текущую матрицу или матрицу A: например 4×4, 1×4, 4×1)
+                    val dynDim = maxOf(activeRows, activeCols, algRowsA).coerceIn(2, 7)
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(containerColor = CardDark),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp, horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Строк $tabName:", color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CounterButton("−", activeRows > 1) {
+                                        if (activeRows > 1) setMatrixDimensions(selectedMatrixTab, activeRows - 1, activeCols)
+                                    }
+                                    Text("$activeRows", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                                    CounterButton("+", activeRows < 7) {
+                                        if (activeRows < 7) setMatrixDimensions(selectedMatrixTab, activeRows + 1, activeCols)
+                                    }
+                                }
+                            }
+                        }
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(containerColor = CardDark),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp, horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Столб. $tabName:", color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CounterButton("−", activeCols > 1) {
+                                        if (activeCols > 1) setMatrixDimensions(selectedMatrixTab, activeRows, activeCols - 1)
+                                    }
+                                    Text("$activeCols", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                                    CounterButton("+", activeCols < 7) {
+                                        if (activeCols < 7) setMatrixDimensions(selectedMatrixTab, activeRows, activeCols + 1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Динамические пресеты размеров: d×d Квадр., 1×d Строка, d×1 Столбец
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        QuickActionChip("${dynDim}×$dynDim Квадр.", AccentEmerald, Color(0xFF1E293B), Modifier.weight(1f)) {
+                            setMatrixDimensions(selectedMatrixTab, dynDim, dynDim)
+                        }
+                        QuickActionChip("1×$dynDim Строка", AccentCyan, Color(0xFF1E293B), Modifier.weight(1f)) {
+                            setMatrixDimensions(selectedMatrixTab, 1, dynDim)
+                        }
+                        QuickActionChip("${dynDim}×1 Столбец", AccentPurple, Color(0xFF1E293B), Modifier.weight(1f)) {
+                            setMatrixDimensions(selectedMatrixTab, dynDim, 1)
+                        }
+                    }
+                } else {
+                    // В РАЗДЕЛЕ "ТАУ, СПЕКТР И f(A)":
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = CardDark),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        when (selectedMatrixTab) {
+                            0 -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Матрица состояния A (n×n)", color = AccentCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Порядок системы n для B (n×m) и C (k×n)", color = TextDim, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CounterButton("−", tauN > 2) {
+                                            if (tauN > 2) setMatrixDimensions(0, tauN - 1, tauN - 1)
+                                        }
+                                        Text("${tauN}×$tauN", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                                        CounterButton("+", tauN < 7) {
+                                            if (tauN < 7) setMatrixDimensions(0, tauN + 1, tauN + 1)
+                                        }
+                                    }
+                                }
+                            }
+                            1 -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Матрица управления B (${tauN}×$tauM)", color = AccentPurple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Строк n = $tauN 🔒 • Столбцов (входов) m:", color = TextDim, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CounterButton("−", tauM > 1) {
+                                            if (tauM > 1) setMatrixDimensions(1, tauN, tauM - 1)
+                                        }
+                                        Text("m = $tauM", color = AccentPurple, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                                        CounterButton("+", tauM < 7) {
+                                            if (tauM < 7) setMatrixDimensions(1, tauN, tauM + 1)
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Матрица выхода C (${tauK}×$tauN)", color = AccentAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("Столбцов n = $tauN 🔒 • Строк (выходов) k:", color = TextDim, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CounterButton("−", tauK > 1) {
+                                            if (tauK > 1) setMatrixDimensions(2, tauK - 1, tauN)
+                                        }
+                                        Text("k = $tauK", color = AccentAmber, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                                        CounterButton("+", tauK < 7) {
+                                            if (tauK < 7) setMatrixDimensions(2, tauK + 1, tauN)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // --- СЕТКА ВВОДА ЯЧЕЕК ТЕКУЩЕЙ МАТРИЦЫ ---
+                MatrixGridInput(
+                    rows = activeRows,
+                    cols = activeCols,
+                    data = activeData,
+                    accentColor = activeAccent,
+                    cellSize = calculatedCellSize,
+                    fontSize = cellFontSize,
+                    onValueChange = { r, c, v ->
+                        val updated = activeData.mapIndexed { ri, row ->
+                            if (ri == r) row.mapIndexed { ci, cur -> if (ci == c) v else cur } else row
+                        }
+                        updateActiveMatrix(updated)
+                    }
+                )
+
+                // --- РЯД 1: Рандом | Единичная | Копировать | Вставить | Сброс ---
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    QuickActionChip("🎲 Рандом", TextWhite, Color(0xFF1E293B), Modifier.weight(1f)) {
+                        updateActiveMatrix(List(activeRows) { List(activeCols) { Random.nextInt(-9, 10).toString() } })
+                    }
+                    QuickActionChip("𝐈 Единич.", AccentEmerald, AccentEmerald.copy(alpha = 0.14f), Modifier.weight(1f)) {
+                        updateActiveMatrix(List(activeRows) { r -> List(activeCols) { c -> if (r == c) "1" else "0" } })
+                    }
+                    QuickActionChip("📄 Копир.", AccentAmber, AccentAmber.copy(alpha = 0.15f), Modifier.weight(1f)) {
+                        val txt = activeData.joinToString("\n") { it.joinToString("\t") }
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Matrix $tabName", txt))
+                        Toast.makeText(context, "Матрица $tabName скопирована!", Toast.LENGTH_SHORT).show()
+                    }
+                    QuickActionChip("📋 Встав.", AccentCyan, AccentCyan.copy(alpha = 0.16f), Modifier.weight(1f)) {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+                        if (!clipText.isNullOrEmpty()) {
+                            val autoParsed = parsePastedTextAutoSize(clipText)
+                            if (autoParsed != null) {
+                                val newR = autoParsed.size
+                                val newC = autoParsed[0].size
+                                if (mainTab == 0) {
+                                    // В Алгебре ставим точный размер вставленной матрицы
+                                    setMatrixDimensions(selectedMatrixTab, newR, newC)
+                                    updateActiveMatrix(autoParsed)
+                                    Toast.makeText(context, "Вставлено в $tabName (${newR}×$newC)!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    // В ТАУ умно адаптируем канонические размерности n, m, k под вставленную матрицу
+                                    when (selectedMatrixTab) {
+                                        0 -> {
+                                            val n = maxOf(newR, newC).coerceIn(2, 7)
+                                            tauN = n
+                                            matrixA = resizeMatrix(autoParsed, n, n)
+                                            matrixB = resizeMatrix(matrixB, n, tauM)
+                                            matrixC = resizeMatrix(matrixC, tauK, n)
+                                            Toast.makeText(context, "Вставлено в A (${n}×$n)!", Toast.LENGTH_SHORT).show()
+                                        }
+                                        1 -> {
+                                            if (newR in 2..7) {
+                                                tauN = newR
+                                                matrixA = resizeMatrix(matrixA, tauN, tauN)
+                                                matrixC = resizeMatrix(matrixC, tauK, tauN)
+                                            }
+                                            tauM = newC.coerceIn(1, 7)
+                                            matrixB = resizeMatrix(autoParsed, tauN, tauM)
+                                            Toast.makeText(context, "Вставлено в B (${tauN}×$tauM)!", Toast.LENGTH_SHORT).show()
+                                        }
+                                        else -> {
+                                            if (newC in 2..7) {
+                                                tauN = newC
+                                                matrixA = resizeMatrix(matrixA, tauN, tauN)
+                                                matrixB = resizeMatrix(matrixB, tauN, tauM)
+                                            }
+                                            tauK = newR.coerceIn(1, 7)
+                                            matrixC = resizeMatrix(autoParsed, tauK, tauN)
+                                            Toast.makeText(context, "Вставлено в C (${tauK}×$tauN)!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(context, "Не удалось распознать!", Toast.LENGTH_SHORT).show()
+                            }
+                        } else Toast.makeText(context, "Буфер пуст!", Toast.LENGTH_SHORT).show()
+                    }
+                    QuickActionChip("✕", Color(0xFFF87171), Color(0xFF2A1621), Modifier.weight(0.55f)) {
+                        updateActiveMatrix(List(activeRows) { List(activeCols) { "0" } })
+                    }
+                }
+
+                // --- РЯД 2: БЫСТРЫЙ ПЕРЕНОС И ОБМЕН МЕЖДУ МАТРИЦАМИ A, B, C (УНИВЕРСАЛЬНО ДЛЯ АЛГЕБРЫ И ТАУ) ---
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val other1 = when (selectedMatrixTab) { 0 -> 1; 1 -> 0; else -> 0 }
+                    val other2 = when (selectedMatrixTab) { 0 -> 2; 1 -> 2; else -> 1 }
+                    val name1 = listOf("A", "B", "C")[other1]
+                    val name2 = listOf("A", "B", "C")[other2]
+                    val color1 = listOf(AccentCyan, AccentPurple, AccentAmber)[other1]
+                    val color2 = listOf(AccentCyan, AccentPurple, AccentAmber)[other2]
+
+                    fun copyCurrentToTarget(targetIdx: Int) {
+                        val r = activeRows
+                        val c = activeCols
+                        val copied = resizeMatrix(activeData, r, c)
+                        val targetName = listOf("A", "B", "C")[targetIdx]
+                        if (mainTab == 0) {
+                            // В Алгебре переносим матрицу ВМЕСТЕ С ЕЁ РАЗМЕРОМ (например, столбик 3×1 в квадратную матрицу делает её 3×1!)
+                            when (targetIdx) {
+                                0 -> { algRowsA = r; algColsA = c; matrixA = copied }
+                                1 -> { algRowsB = r; algColsB = c; matrixB = copied }
+                                else -> { algRowsC = r; algColsC = c; matrixC = copied }
+                            }
+                            selectedMatrixTab = targetIdx // Сразу переключаем фокус на целевую матрицу, чтобы вы видели результат!
+                            Toast.makeText(context, "$tabName (${r}×$c) ➔ в $targetName (${r}×$c)!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val parsedCur = runCatching { parse(activeData) }.getOrNull()
+                            if (parsedCur != null) {
+                                transferResultToTarget(targetIdx, parsedCur)
+                                selectedMatrixTab = targetIdx
+                            }
+                        }
+                    }
+
+                    QuickActionChip("$tabName ➔ в $name1", color1, color1.copy(alpha = 0.12f), Modifier.weight(1f)) {
+                        copyCurrentToTarget(other1)
+                    }
+                    QuickActionChip("$tabName ➔ в $name2", color2, color2.copy(alpha = 0.12f), Modifier.weight(1f)) {
+                        copyCurrentToTarget(other2)
+                    }
+                    QuickActionChip("$tabName ⇄ $name1", TextWhite, Color(0xFF1E293B), Modifier.weight(1f)) {
+                        if (mainTab == 0) {
+                            if (selectedMatrixTab == 0 || selectedMatrixTab == 1) {
+                                val rA = algRowsA; val cA = algColsA; val mA = matrixA
+                                algRowsA = algRowsB; algColsA = algColsB; matrixA = matrixB
+                                algRowsB = rA; algColsB = cA; matrixB = mA
+                            } else {
+                                val rC = algRowsC; val cC = algColsC; val mC = matrixC
+                                algRowsC = algRowsA; algColsC = algColsA; matrixC = matrixA
+                                algRowsA = rC; algColsA = cC; matrixA = mC
+                            }
+                        } else {
+                            // В режиме ТАУ обмениваем содержимое с сохранением канонических размерностей n×n, n×m, k×n
+                            if (selectedMatrixTab == 0 || selectedMatrixTab == 1) {
+                                val oldA = viewA; val oldB = viewB
+                                matrixA = resizeMatrix(oldB, tauN, tauN)
+                                matrixB = resizeMatrix(oldA, tauN, tauM)
+                            } else {
+                                val oldA = viewA; val oldC = viewC
+                                matrixA = resizeMatrix(oldC, tauN, tauN)
+                                matrixC = resizeMatrix(oldA, tauK, tauN)
+                            }
+                        }
+                        Toast.makeText(context, "$tabName ⇄ $name1 обменяны!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                // --- ПАНЕЛЬ ОПЕРАЦИЙ (ВКЛАДКА 0 = АЛГЕБРА И ВЕКТОРЫ | ВКЛАДКА 1 = ТАУ, СПЕКТР И f(A)) ---
+                AnimatedContent(
+                    targetState = mainTab,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "MainTabOperations"
+                ) { mode ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(CardDark.copy(alpha = 0.72f))
+                            .border(1.dp, Color(0xFF1F2D46), RoundedCornerShape(16.dp))
+                            .padding(12.dp)
+                    ) {
+                        if (mode == 0) {
+                            // ================= РАЗДЕЛ 0: АЛГЕБРА И ВЕКТОРЫ =================
+                            SectionHeader("Свойства и унарные операции над [$tabName (${activeRows}×$activeCols)]")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("${tabName}⁻¹ (Обратная)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        if (activeRows != activeCols) {
+                                            lastResultTitle = "Обратная $tabName⁻¹"
+                                            lastResultMatrix = null; lastResultGrid = null
+                                            resultScalarText = "Обратная матрица существует только для квадратных матриц (сейчас ${activeRows}×$activeCols)!"
+                                            isError = true; scrollToBottom()
+                                        } else {
+                                            val res = math.inverse(parse(activeData))
+                                            if (res != null) {
+                                                showMatrixResult(res, "Обратная $tabName⁻¹")
+                                            } else {
+                                                lastResultTitle = "Обратная $tabName⁻¹"
+                                                lastResultMatrix = null; lastResultGrid = null
+                                                resultScalarText = "Матрица вырождена (det = 0) или плохо обусловлена!\nОбратная матрица не существует."
+                                                isError = true; scrollToBottom()
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка обращения матрицы"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("${tabName}ᵀ (Трансп.)", Modifier.weight(1f)) {
+                                    try {
+                                        showMatrixResult(math.transpose(parse(activeData)), "Транспонирование ${tabName}ᵀ")
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка транспонирования"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("det($tabName)", Modifier.weight(1f)) {
+                                    try {
+                                        lastResultTitle = "Определитель det($tabName)"
+                                        lastResultMatrix = null; lastResultGrid = null
+                                        if (activeRows != activeCols) {
+                                            resultScalarText = "Определитель определён только для квадратных матриц (сейчас ${activeRows}×$activeCols)!"
+                                            isError = true
+                                        } else {
+                                            val res = math.determinant(parse(activeData))
+                                            if (res == null) {
+                                                resultScalarText = "Переполнение при вычислении det($tabName)"
+                                                isError = true
+                                            } else {
+                                                val txt = "det($tabName) = ${formatNumber(res)}"
+                                                resultScalarText = txt; isError = false
+                                                addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                            }
+                                        }
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Rank($tabName)", Modifier.weight(1f)) {
+                                    try {
+                                        lastResultTitle = "Ранг rank($tabName)"
+                                        lastResultMatrix = null; lastResultGrid = null
+                                        val res = math.rank(parse(activeData))
+                                        val txt = "rank($tabName) = $res"
+                                        resultScalarText = txt; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("След Tr($tabName)", Modifier.weight(1f)) {
+                                    try {
+                                        lastResultTitle = "След Tr($tabName)"
+                                        lastResultMatrix = null; lastResultGrid = null
+                                        if (activeRows != activeCols) {
+                                            resultScalarText = "След матрицы определён только для квадратных матриц!"
+                                            isError = true
+                                        } else {
+                                            val res = math.trace(parse(activeData))
+                                            val txt = "Tr($tabName) = ${formatNumber(res ?: 0.0)}"
+                                            resultScalarText = txt; isError = false
+                                            addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                        }
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("‖$tabName‖_F", Modifier.weight(1f)) {
+                                    try {
+                                        lastResultTitle = "Норма Фробениуса ‖$tabName‖_F"
+                                        lastResultMatrix = null; lastResultGrid = null
+                                        val norm = math.norm(parse(activeData))
+                                        val txt = "‖$tabName‖_F = ${formatNumber(norm)}"
+                                        resultScalarText = txt; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("‖$tabName‖_2", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        lastResultTitle = "Спектральная норма ‖$tabName‖_2"
+                                        lastResultMatrix = null; lastResultGrid = null
+                                        val norm2 = math.spectralNorm(parse(activeData))
+                                        val txt = if (norm2 != null) "‖$tabName‖_2 = ${formatNumber(norm2)}" else "Ошибка вычисления нормы"
+                                        resultScalarText = txt; isError = norm2 == null
+                                        if (norm2 != null) addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SectionHeader("Арифметика матриц A (${curRowsA}×$curColsA), B (${curRowsB}×$curColsB), C (${curRowsC}×$curColsC)")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("A + B", Modifier.weight(1f)) {
+                                    try { showMatrixResult(math.add(parse(viewA), parse(viewB)), "A + B") }
+                                    catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                                AdaptiveBtn("A − B", Modifier.weight(1f)) {
+                                    try { showMatrixResult(math.subtract(parse(viewA), parse(viewB)), "A − B") }
+                                    catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                                AdaptiveBtn("A × B", Modifier.weight(1f), colorType = 1) {
+                                    try { showMatrixResult(math.multiply(parse(viewA), parse(viewB)), "A × B") }
+                                    catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("A + B + C", Modifier.weight(1f)) {
+                                    try {
+                                        val ab = math.add(parse(viewA), parse(viewB))
+                                        val res = if (ab != null) math.add(ab, parse(viewC)) else null
+                                        showMatrixResult(res, "A + B + C")
+                                    } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                                AdaptiveBtn("A − B − C", Modifier.weight(1f)) {
+                                    try {
+                                        val ab = math.subtract(parse(viewA), parse(viewB))
+                                        val res = if (ab != null) math.subtract(ab, parse(viewC)) else null
+                                        showMatrixResult(res, "A − B − C")
+                                    } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                                AdaptiveBtn("A × B × C", Modifier.weight(1f)) {
+                                    try {
+                                        val ab = math.multiply(parse(viewA), parse(viewB))
+                                        val res = if (ab != null) math.multiply(ab, parse(viewC)) else null
+                                        showMatrixResult(res, "A × B × C")
+                                    } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SectionHeader("Векторные операции (над A и B как векторами)")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("a · b (Скалярное)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Скалярное произведение a · b"
+                                        val totalA = curRowsA * curColsA; val totalB = curRowsB * curColsB
+                                        if (totalA != totalB) {
+                                            lastResultMatrix = null; lastResultGrid = null
+                                            resultScalarText = "У векторов A и B должно быть одинаковое количество элементов ($totalA ≠ $totalB)!"
+                                            isError = true
+                                        } else {
+                                            val dot = math.dotProduct(parse(viewA), parse(viewB))
+                                            val txt = "a · b = ${formatNumber(dot ?: 0.0)}"
+                                            lastResultMatrix = null; lastResultGrid = null; resultScalarText = txt; isError = false
+                                            addHistoryItem(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
+                                        }
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("a ⨯ b (Векторное 3D)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Векторное произведение a ⨯ b"
+                                        val totalA = curRowsA * curColsA; val totalB = curRowsB * curColsB
+                                        if (totalA != 3 || totalB != 3) {
+                                            lastResultMatrix = null; lastResultGrid = null
+                                            resultScalarText = "Векторное произведение определено только для 3D-векторов (3 элемента)!"
+                                            isError = true; scrollToBottom()
+                                        } else {
+                                            showMatrixResult(math.crossProduct(parse(viewA), parse(viewB)), "Векторное a ⨯ b")
+                                        }
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0B1322))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Скаляр k:", color = TextDim, fontSize = 12.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(64.dp)
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(CardDark)
+                                        .border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    BasicTextField(
+                                        value = scalarK,
+                                        onValueChange = { scalarK = it },
+                                        textStyle = TextStyle(color = TextWhite, textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        cursorBrush = SolidColor(AccentCyan)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val k = parseSmartCell(scalarK) ?: 1.0
+                                            showMatrixResult(math.multiplyScalar(parse(activeData), k), "Умножение $scalarK × $tabName")
+                                        } catch (e: Exception) {
+                                            lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f).height(36.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text("Вычислить k × $tabName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            // ================= РАЗДЕЛ 1: ОБЪЕДИНЕННЫЙ РАЗДЕЛ "ТАУ, СПЕКТР И f(A)" =================
+                            // Матрица A: n×n, Матрица B: n×m, Матрица C: k×n
+                            val targetForSquareFunc = if (activeRows == activeCols) activeData else viewA
+                            val targetName = if (activeRows == activeCols) tabName else "A"
+
+                            SectionHeader("Спектр и канонические формы матрицы [$targetName (${tauN}×$tauN)]")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("λ_i (Числа)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Собственные числа λ_i ($targetName)"
+                                        val raw = parse(targetForSquareFunc)
+                                        val eig = math.eigenvalues(raw)
+                                        val text = eig.mapIndexed { idx, c -> "λ_${idx + 1} = $c" }.joinToString("\n")
+                                        resultScalarText = text
+                                        lastResultMatrix = null; lastResultGrid = null; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = text, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления λ_i"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("v_i (Векторы)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Собственные и присоед. векторы ($targetName)"
+                                        val raw = parse(targetForSquareFunc)
+                                        val eig = math.eigenvalues(raw)
+                                        val vectorsInfo = math.eigenvectorsWithDetails(raw, eig)
+                                        val text = vectorsInfo.joinToString("\n\n") { info ->
+                                            val typeStr = if (info.isAssociated) {
+                                                "Присоединенный вектор (ур. ${info.chainLevel})"
+                                            } else {
+                                                "Собственный вектор"
+                                            }
+                                            "v_${info.index} (λ_${info.index} = ${info.lambda}) — $typeStr:\n" +
+                                                    "  Ненормированный: ${info.canon}\n" +
+                                                    "  Нормированный:   ${info.unit}"
+                                        }
+                                        resultScalarText = text
+                                        lastResultMatrix = null; lastResultGrid = null; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = text, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления векторов"; scrollToBottom()
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("ЖНФ (Комплексная)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "ЖНФ ($targetName)"
+                                        val raw = parse(targetForSquareFunc)
+                                        val (desc, jnfGrid) = math.jordanForm(raw)
+                                        resultScalarText = desc
+                                        lastResultGrid = jnfGrid.takeIf { it.isNotEmpty() }
+                                        lastResultMatrix = null
+                                        isError = jnfGrid.isEmpty()
+                                        if (!isError) {
+                                            addHistoryItem(HistoryItem(title = lastResultTitle, resultText = "$desc\n" + jnfGrid.joinToString("\n") { it.joinToString("\t") }, resultMatrix = null))
+                                        }
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultGrid = null; lastResultMatrix = null; isError = true
+                                        resultScalarText = e.message ?: "Не удалось вычислить ЖНФ"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("РЖНФ (Вещественная)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "РЖНФ ($targetName)"
+                                        val raw = parse(targetForSquareFunc)
+                                        val (desc, rjnfGrid) = math.realJordanForm(raw)
+                                        resultScalarText = desc
+                                        lastResultGrid = rjnfGrid.takeIf { it.isNotEmpty() }
+                                        lastResultMatrix = null
+                                        isError = rjnfGrid.isEmpty()
+                                        if (!isError) {
+                                            addHistoryItem(HistoryItem(title = lastResultTitle, resultText = "$desc\n" + rjnfGrid.joinToString("\n") { it.joinToString("\t") }, resultMatrix = null))
+                                        }
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultGrid = null; lastResultMatrix = null; isError = true
+                                        resultScalarText = e.message ?: "Не удалось вычислить РЖНФ"; scrollToBottom()
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Характеристический многочлен p(λ)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Характеристический многочлен p(λ) ($targetName)"
+                                        val coefficients = characteristicPolynomialCoefficients(parse(targetForSquareFunc))
+                                        val polynomial = formatCharacteristicPolynomial(coefficients)
+                                        resultScalarText = "p(λ) = $polynomial"
+                                        lastResultMatrix = null; lastResultGrid = null; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления p(λ)"; scrollToBottom()
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SectionHeader("Устойчивость и критерии Калмана: A (${tauN}×$tauN), B (${tauN}×$tauM), C (${tauK}×$tauN)")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Непрерывная Re(λ)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        lastResultTitle = "Устойчивость непрерывной системы"
+                                        val eigenvalues = math.eigenvalues(parse(viewA))
+                                        val maxReal = eigenvalues.maxOf { it.re }
+                                        val verdict = when {
+                                            maxReal < -1e-8 -> "✅ АСИМПТОТИЧЕСКИ УСТОЙЧИВА\nВсе Re(λ_i) < 0"
+                                            maxReal > 1e-8 -> "❌ НЕУСТОЙЧИВА\nСуществует Re(λ_i) > 0"
+                                            else -> "⚠️ ПОГРАНИЧНЫЙ СЛУЧАЙ\nЕсть корни на мнимой оси Re(λ) = 0"
+                                        }
+                                        val details = eigenvalues.mapIndexed { idx, v -> "λ_${idx + 1} = $v" }.joinToString("\n")
+                                        resultScalarText = "$verdict\n\nСпектр матрицы A:\n$details"
+                                        lastResultMatrix = null; lastResultGrid = null; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("Дискретная ρ(A)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        lastResultTitle = "Спектральный радиус ρ(A)"
+                                        val eigenvalues = math.eigenvalues(parse(viewA))
+                                        val spectralRadius = eigenvalues.maxOf { it.abs() }
+                                        val stabilityMessage = when {
+                                            spectralRadius < 1.0 - 1e-8 -> "✅ АСИМПТОТИЧЕСКИ УСТОЙЧИВА (|λ_i| < 1)"
+                                            spectralRadius > 1.0 + 1e-8 -> "❌ НЕУСТОЙЧИВА (существует |λ_i| > 1)"
+                                            else -> "⚠️ НА ГРАНИЦЕ ЕДИНИЧНОГО КРУГА (ρ ≈ 1)"
+                                        }
+                                        val details = eigenvalues.mapIndexed { idx, v -> "λ_${idx + 1} = $v" }.joinToString("\n")
+                                        resultScalarText = "ρ(A) = ${formatPreciseNumber(spectralRadius)}\n\n$stabilityMessage\n\nСпектр матрицы A:\n$details"
+                                        lastResultMatrix = null; lastResultGrid = null; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Управляемость (A,B)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Матрица управляемости W_c"
+                                        val matA = parse(viewA); val matB = parse(viewB)
+                                        val wc = math.controllability(matA, matB)
+                                        val r = math.rank(wc)
+                                        val state = if (r == matA.size) "✅ Система ПОЛНОСТЬЮ управляема" else "❌ Система НЕ полностью управляема (rank = $r < ${matA.size})"
+                                        resultScalarText = "A (${tauN}×$tauN), B (${tauN}×$tauM)\nrank(W_c) = $r из ${matA.size}\n$state"
+                                        lastResultGrid = null; lastResultMatrix = wc; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = wc))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("Наблюдаемость (A,C)", Modifier.weight(1f), colorType = 2) {
+                                    try {
+                                        lastResultTitle = "Матрица наблюдаемости W_o"
+                                        val matA = parse(viewA); val matC = parse(viewC)
+                                        val wo = math.observability(matA, matC)
+                                        val r = math.rank(wo)
+                                        val state = if (r == matA.size) "✅ Система ПОЛНОСТЬЮ наблюдаема" else "❌ Система НЕ полностью наблюдаема (rank = $r < ${matA.size})"
+                                        resultScalarText = "A (${tauN}×$tauN), C (${tauK}×$tauN)\nrank(W_o) = $r из ${matA.size}\n$state"
+                                        lastResultGrid = null; lastResultMatrix = wo; isError = false
+                                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = wo))
+                                        scrollToBottom()
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Анализ системы (Блок-схема и Разложение Калмана)", Modifier.weight(1f), colorType = 1) {
+                                    flowUseB = viewB.any { row -> row.any { (parseSmartCell(it) ?: 0.0) != 0.0 } }
+                                    flowUseC = viewC.any { row -> row.any { (parseSmartCell(it) ?: 0.0) != 0.0 } }
+                                    showFlowDialog = true
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SectionHeader("Синтез регуляторов и канонические формы (ТАУ)")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("Фробениус (A,B)", Modifier.weight(1f), colorType = 2) {
+                                    frobSize = tauN
+                                    frobA = resizeMatrix(viewA, tauN, tauN)
+                                    frobB = List(tauN) { r -> listOf(viewB.getOrNull(r)?.getOrNull(0) ?: "0") }
+                                    showFrobeniusDialog = true
+                                }
+                                AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) {
+                                    designSize = tauN
+                                    designA = resizeMatrix(viewA, tauN, tauN)
+                                    designB = List(tauN) { r -> listOf(viewB.getOrNull(r)?.getOrNull(0) ?: "0") }
+                                    val initEigs = runCatching { math.eigenvalues(parse(designA)) }.getOrDefault(emptyList())
+                                    poleAssignments = List(tauN) { i -> initEigs.getOrNull(i)?.toString()?.replace(" ", "") ?: "-1" }
+                                    showPolesDialog = true
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("LQR-оптимизация (Уравнение Риккати CARE)", Modifier.weight(1f), colorType = 2) {
+                                    // В режиме ТАУ матрица B на главном экране УЖЕ имеет размер n×m!
+                                    lqrN = tauN
+                                    lqrM = tauM
+                                    lqrAInput = resizeMatrix(viewA, lqrN, lqrN)
+                                    lqrBInput = resizeMatrix(viewB, lqrN, lqrM)
+                                    val parsedC = runCatching { parse(matrixC) }.getOrNull()
+                                    val isSquareNonZeroC = parsedC != null && parsedC.size >= lqrN && parsedC[0].size >= lqrN &&
+                                            parsedC.any { row -> row.any { abs(it) > 1e-12 } }
+                                    lqrQInput = if (isSquareNonZeroC) resizeMatrix(matrixC, lqrN, lqrN) else identityStringGrid(lqrN)
+                                    lqrRInput = identityStringGrid(lqrM)
+                                    showLqrDialog = true
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            SectionHeader("Высшие матричные функции от [$targetName (${tauN}×$tauN)]")
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("e^$targetName", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        showMatrixResult(math.matrixExponential(parse(targetForSquareFunc)), "Экспонента e^$targetName")
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления e^A"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("ln($targetName)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        val res = math.matrixLog(parse(targetForSquareFunc))
+                                        if (res != null) {
+                                            showMatrixResult(res, "Логарифм ln($targetName)")
+                                        } else {
+                                            lastResultTitle = "Логарифм ln($targetName)"
+                                            lastResultMatrix = null; lastResultGrid = null; isError = true
+                                            resultScalarText = "Вещественный главный логарифм матрицы не существует (проверьте, что det($targetName) > 0 и нет отрицательных вещественных корней)."
+                                            scrollToBottom()
+                                        }
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления ln(A)"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("√$targetName", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        val res = math.matrixSqrt(parse(targetForSquareFunc))
+                                        if (res != null) {
+                                            showMatrixResult(res, "Корень √$targetName")
+                                        } else {
+                                            lastResultTitle = "Корень √$targetName"
+                                            lastResultMatrix = null; lastResultGrid = null; isError = true
+                                            resultScalarText = "Вещественный квадратный корень матрицы не существует."
+                                            scrollToBottom()
+                                        }
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления √A"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("${targetName}^k", Modifier.weight(1f), colorType = 1) { showPowerDialog = true }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AdaptiveBtn("sin($targetName)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        showMatrixResult(math.matrixTrig(parse(targetForSquareFunc)).first, "Синус sin($targetName)")
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления sin(A)"; scrollToBottom()
+                                    }
+                                }
+                                AdaptiveBtn("cos($targetName)", Modifier.weight(1f), colorType = 1) {
+                                    try {
+                                        showMatrixResult(math.matrixTrig(parse(targetForSquareFunc)).second, "Косинус cos($targetName)")
+                                    } catch (e: Exception) {
+                                        lastResultMatrix = null; lastResultGrid = null; isError = true
+                                        resultScalarText = e.message ?: "Ошибка вычисления cos(A)"; scrollToBottom()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // --- КАРТОЧКА РЕЗУЛЬТАТА ---
+                ResultCardBlock(
+                    title = lastResultTitle,
+                    lastResultMatrix = lastResultMatrix,
+                    lastResultGrid = lastResultGrid,
+                    resultScalarText = resultScalarText,
+                    isError = isError,
+                    screenWidth = screenWidth,
+                    context = context,
+                    onClearResult = {
+                        lastResultMatrix = null
+                        lastResultGrid = null
+                        resultScalarText = ""
+                        isError = false
+                    },
+                    onTransferToA = { mat: Array<DoubleArray> -> transferResultToTarget(0, mat) },
+                    onTransferToB = { mat: Array<DoubleArray> -> transferResultToTarget(1, mat) },
+                    onTransferToC = { mat: Array<DoubleArray> -> transferResultToTarget(2, mat) }
+                )
             }
         }
 
+        // --- ШТОРКА ИСТОРИИ ВЫЧИСЛЕНИЙ ---
         if (showHistorySheet) {
             ModalBottomSheet(
                 onDismissRequest = { showHistorySheet = false },
@@ -329,822 +1439,66 @@ fun MainAppSwitcher() {
                 HistoryBottomSheetContent(
                     historyList = historyList,
                     onClearHistory = { clearAllHistory() },
-                    onPasteToSquareA = { mat ->
-                        if (mat.size == mat[0].size && mat.size in 2..7) {
-                            squareSize = mat.size
-                            squareMatrixA = matrixToPreciseStringList(mat)
-                            showHistorySheet = false
-                        } else Toast.makeText(context, "Нужна квадратная матрица 2×2–7×7", Toast.LENGTH_LONG).show()
-                    },
-                    onPasteToSquareB = { mat ->
-                        if (mat.size == mat[0].size && mat.size in 2..7) {
-                            squareSize = mat.size
-                            squareMatrixB = matrixToPreciseStringList(mat)
-                            showHistorySheet = false
-                        } else Toast.makeText(context, "Нужна квадратная матрица 2×2–7×7", Toast.LENGTH_LONG).show()
-                    },
-                    onPasteToSquareC = { mat ->
-                        if (mat.size == mat[0].size && mat.size in 2..7) {
-                            squareSize = mat.size
-                            squareMatrixC = matrixToPreciseStringList(mat)
-                            showHistorySheet = false
-                        } else Toast.makeText(context, "Нужна квадратная матрица 2×2–7×7", Toast.LENGTH_LONG).show()
-                    }
+                    onPasteToSquareA = { mat -> transferResultToTarget(0, mat); showHistorySheet = false },
+                    onPasteToSquareB = { mat -> transferResultToTarget(1, mat); showHistorySheet = false },
+                    onPasteToSquareC = { mat -> transferResultToTarget(2, mat); showHistorySheet = false }
                 )
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SquareMatricesScreen(
-    size: Int, onSizeChange: (Int) -> Unit,
-    selectedTab: Int, onTabChange: (Int) -> Unit,
-    matrixA: List<List<String>>, onMatrixAChange: (List<List<String>>) -> Unit,
-    matrixB: List<List<String>>, onMatrixBChange: (List<List<String>>) -> Unit,
-    matrixC: List<List<String>>, onMatrixCChange: (List<List<String>>) -> Unit,
-    scalarK: String, onScalarKChange: (String) -> Unit,
-    onAddToHistory: (HistoryItem) -> Unit
-) {
-    val context = LocalContext.current
-    val configuration = LocalConfiguration.current
-    val math = remember { MatrixMath() }
-    val screenWidth = configuration.screenWidthDp.dp
-    val scrollState = rememberScrollState()
-    val coroutineScope = rememberCoroutineScope()
-
-    var operationCategory by rememberSaveable { mutableIntStateOf(0) }
-    var designColsB by rememberSaveable { mutableIntStateOf(1) }
-    var lastResultTitle by remember { mutableStateOf("Результат") }
-    var lastResultMatrix by remember { mutableStateOf<Array<DoubleArray>?>(null) }
-    var lastResultGrid by remember { mutableStateOf<List<List<String>>?>(null) }
-    var resultScalarText by remember { mutableStateOf("") }
-    var isError by remember { mutableStateOf(false) }
-
-    fun scrollToBottom() {
-        coroutineScope.launch {
-            scrollState.animateScrollTo(scrollState.maxValue)
-        }
-    }
-
-    fun showMatrixResult(
-        result: Array<DoubleArray>?,
-        operationName: String
-    ) {
-        lastResultTitle = operationName
-        lastResultGrid = null
-
-        if (result == null) {
-            lastResultMatrix = null
-            resultScalarText =
-                "Не удалось выполнить операцию \"$operationName\".\n" +
-                        "Проверьте размеры матриц и допустимость операции."
-            isError = true
-            scrollToBottom()
-            return
-        }
-
-        if (result.any { row -> row.any { !it.isFinite() } }) {
-            lastResultMatrix = null
-            resultScalarText =
-                "Ошибка вычисления \"$operationName\".\n" +
-                        "Результат содержит NaN или бесконечность."
-            isError = true
-            scrollToBottom()
-            return
-        }
-
-        lastResultMatrix = result
-        resultScalarText = ""
-        isError = false
-
-        onAddToHistory(
-            HistoryItem(
-                title = operationName,
-                resultText = formatMatrixRaw(result),
-                resultMatrix = result
-            )
-        )
-        scrollToBottom()
-    }
-
-    var showPowerDialog by remember { mutableStateOf(false) }
-    var powerInput by remember { mutableStateOf("3") }
-
-    var showPolesDialog by remember { mutableStateOf(false) }
-    var showFrobeniusDialog by remember { mutableStateOf(false) }
-    var showLqrDialog by remember { mutableStateOf(false) }
-
-    var frobSize by rememberSaveable { mutableIntStateOf(2) }
-    var frobSizeInput by rememberSaveable { mutableStateOf("2") }
-    var frobA by remember { mutableStateOf(List(2) { List(2) { "0" } }) }
-    var frobB by remember { mutableStateOf(List(2) { listOf("0") }) }
-
-    var lqrN by rememberSaveable { mutableIntStateOf(2) }
-    var lqrM by rememberSaveable { mutableIntStateOf(1) }
-    var lqrNInput by rememberSaveable { mutableStateOf("2") }
-    var lqrMInput by rememberSaveable { mutableStateOf("1") }
-
-    var lqrAInput by remember { mutableStateOf(List(2) { List(2) { "0" } }) }
-    var lqrBInput by remember { mutableStateOf(List(2) { listOf("0") }) }
-    var lqrQInput by remember { mutableStateOf(identityStringGrid(2)) }
-    var lqrRInput by remember { mutableStateOf(identityStringGrid(1)) }
-
-    var polesInput by remember { mutableStateOf("0, 0") }
-    var poleAssignments by remember { mutableStateOf(List(2) { "0" }) }
-
-    var designSize by rememberSaveable { mutableIntStateOf(2) }
-    var designSizeInput by rememberSaveable { mutableStateOf("2") }
-    var designA by remember { mutableStateOf(List(2) { List(2) { "0" } }) }
-    var designB by remember { mutableStateOf(List(2) { listOf("0") }) }
-
-    val currentData = when (selectedTab) {
-        0 -> matrixA
-        1 -> matrixB
-        else -> matrixC
-    }
-    val currentAccent = when (selectedTab) {
-        0 -> AccentCyan
-        1 -> AccentPurple
-        else -> AccentAmber
-    }
-    val tabName = when (selectedTab) {
-        0 -> "A"
-        1 -> "B"
-        else -> "C"
-    }
-
-    fun updateCurrent(updated: List<List<String>>) {
-        when (selectedTab) {
-            0 -> onMatrixAChange(updated)
-            1 -> onMatrixBChange(updated)
-            else -> onMatrixCChange(updated)
-        }
-    }
-
-    fun transferSquareOrResize(targetSetter: (List<List<String>>) -> Unit, mat: Array<DoubleArray>, targetName: String) {
-        if (mat.isNotEmpty() && mat.size == mat[0].size && mat.size in 2..7) {
-            if (mat.size != size) onSizeChange(mat.size)
-            targetSetter(matrixToPreciseStringList(mat))
-            Toast.makeText(context, "Перенесено в $targetName (${mat.size}×${mat.size})", Toast.LENGTH_SHORT).show()
-        } else {
-            val resized = resizeMatrix(matrixToPreciseStringList(mat), size, size)
-            targetSetter(resized)
-            Toast.makeText(context, "Вписано в $targetName (${size}×$size)", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    val calculatedCellSize = ((screenWidth - 44.dp) / size).coerceIn(44.dp, 62.dp)
-    val cellFontSize = when {
-        size >= 6 -> 11.sp
-        size >= 5 -> 12.sp
-        calculatedCellSize < 54.dp -> 13.sp
-        else -> 16.sp
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-            .verticalScroll(scrollState),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(CardDark)
-                .padding(6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                MatrixSelectChip("Матрица A", selectedTab == 0, AccentCyan, Modifier.weight(1f)) { onTabChange(0) }
-                MatrixSelectChip("Матрица B", selectedTab == 1, AccentPurple, Modifier.weight(1f)) { onTabChange(1) }
-                MatrixSelectChip("Матрица C", selectedTab == 2, AccentAmber, Modifier.weight(1f)) { onTabChange(2) }
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CounterButton("−", size > 2) { if (size > 2) onSizeChange(size - 1) }
-                Text(
-                    "${size}×$size",
-                    color = TextWhite,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-                CounterButton("+", size < 7) { if (size < 7) onSizeChange(size + 1) }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        MatrixGridInput(
-            rows = size,
-            cols = size,
-            data = currentData,
-            accentColor = currentAccent,
-            cellSize = calculatedCellSize,
-            fontSize = cellFontSize,
-            onValueChange = { r, c, v ->
-                val updated = currentData.mapIndexed { ri, row ->
-                    if (ri == r) row.mapIndexed { ci, cur -> if (ci == c) v else cur } else row
-                }
-                updateCurrent(updated)
-            }
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            QuickActionChip("🎲 Рандом", TextWhite, Color(0xFF1E293B), Modifier.weight(1f)) {
-                updateCurrent(List(size) { List(size) { Random.nextInt(-9, 10).toString() } })
-            }
-            QuickActionChip("𝐈 Единичная", AccentEmerald, AccentEmerald.copy(alpha = 0.14f), Modifier.weight(1f)) {
-                updateCurrent(identityStringGrid(size))
-            }
-            QuickActionChip("📋 Вставить", AccentCyan, AccentCyan.copy(alpha = 0.16f), Modifier.weight(1f)) {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                if (!clipText.isNullOrEmpty()) {
-                    val parsed = parsePastedText(clipText, size, size)
-                    if (parsed != null) {
-                        updateCurrent(parsed)
-                        Toast.makeText(context, "Вставлено в $tabName!", Toast.LENGTH_SHORT).show()
-                    } else Toast.makeText(context, "Не удалось распознать!", Toast.LENGTH_SHORT).show()
-                } else Toast.makeText(context, "Буфер пуст!", Toast.LENGTH_SHORT).show()
-            }
-            QuickActionChip("✕ Сброс", Color(0xFFF87171), Color(0xFF2A1621), Modifier.weight(0.9f)) {
-                updateCurrent(List(size) { List(size) { "0" } })
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(13.dp))
-                .background(CardDark)
-                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(13.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            CategoryPill("⚡ Алгебра", operationCategory == 0, AccentCyan, Modifier.weight(1f)) { operationCategory = 0 }
-            CategoryPill("🎛 Спектр и ТАУ", operationCategory == 1, AccentPurple, Modifier.weight(1.15f)) { operationCategory = 1 }
-            CategoryPill("🚀 Синтез и f(A)", operationCategory == 2, AccentAmber, Modifier.weight(1.15f)) { operationCategory = 2 }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        AnimatedContent(
-            targetState = operationCategory,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = "CategoryContent"
-        ) { category ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(CardDark.copy(alpha = 0.7f))
-                    .border(1.dp, Color(0xFF1F2D46), RoundedCornerShape(16.dp))
-                    .padding(12.dp)
-            ) {
-                when (category) {
-                    0 -> {
-                        SectionHeader("Свойства и унарные операции над [$tabName]")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("${tabName}⁻¹ (Обратная)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    val res = math.inverse(parse(currentData))
-                                    if (res != null) {
-                                        showMatrixResult(res, "Обратная $tabName⁻¹")
-                                    } else {
-                                        lastResultTitle = "Обратная $tabName⁻¹"
-                                        lastResultMatrix = null; lastResultGrid = null
-                                        resultScalarText = "Матрица вырождена (det = 0) или плохо обусловлена!\nОбратная матрица не существует."
-                                        isError = true; scrollToBottom()
-                                    }
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка обращения матрицы"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("${tabName}ᵀ (Трансп.)", Modifier.weight(1f)) {
-                                try {
-                                    showMatrixResult(math.transpose(parse(currentData)), "Транспонирование ${tabName}ᵀ")
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка транспонирования"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("det($tabName)", Modifier.weight(1f)) {
-                                try {
-                                    lastResultTitle = "Определитель det($tabName)"
-                                    lastResultMatrix = null; lastResultGrid = null
-                                    val res = math.determinant(parse(currentData))
-                                    if (res == null) {
-                                        resultScalarText = "Переполнение при вычислении det($tabName)"
-                                        isError = true
-                                    } else {
-                                        val txt = "det($tabName) = ${formatNumber(res)}"
-                                        resultScalarText = txt
-                                        isError = false
-                                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                                    }
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления определителя"; scrollToBottom()
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("Rank($tabName)", Modifier.weight(1f)) {
-                                try {
-                                    lastResultTitle = "Ранг rank($tabName)"
-                                    lastResultMatrix = null; lastResultGrid = null
-                                    val res = math.rank(parse(currentData))
-                                    val txt = "rank($tabName) = $res"
-                                    resultScalarText = txt; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления ранга"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("След Tr($tabName)", Modifier.weight(1f)) {
-                                try {
-                                    lastResultTitle = "След Tr($tabName)"
-                                    lastResultMatrix = null; lastResultGrid = null
-                                    val res = math.trace(parse(currentData))
-                                    if (res == null) {
-                                        resultScalarText = "Ошибка вычисления следа"; isError = true
-                                    } else {
-                                        val txt = "Tr($tabName) = ${formatNumber(res)}"
-                                        resultScalarText = txt; isError = false
-                                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                                    }
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления следа"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("‖$tabName‖_F", Modifier.weight(1f)) {
-                                try {
-                                    lastResultTitle = "Норма Фробениуса ‖$tabName‖_F"
-                                    lastResultMatrix = null; lastResultGrid = null
-                                    val norm = math.norm(parse(currentData))
-                                    val txt = "‖$tabName‖_F = ${formatNumber(norm)}"
-                                    resultScalarText = txt; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления нормы"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("‖$tabName‖_2", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    lastResultTitle = "Спектральная норма ‖$tabName‖_2"
-                                    lastResultMatrix = null; lastResultGrid = null
-                                    val norm2 = math.spectralNorm(parse(currentData))
-                                    val txt = if (norm2 != null) "‖$tabName‖_2 = ${formatNumber(norm2)}" else "Ошибка вычисления нормы"
-                                    resultScalarText = txt; isError = norm2 == null
-                                    if (norm2 != null) onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления нормы"; scrollToBottom()
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        SectionHeader("Арифметика матриц A, B, C")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("A + B", Modifier.weight(1f)) {
-                                try { showMatrixResult(math.add(parse(matrixA), parse(matrixB)), "A + B") }
-                                catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                            AdaptiveBtn("A − B", Modifier.weight(1f)) {
-                                try { showMatrixResult(math.subtract(parse(matrixA), parse(matrixB)), "A − B") }
-                                catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                            AdaptiveBtn("A × B", Modifier.weight(1f), colorType = 1) {
-                                try { showMatrixResult(math.multiply(parse(matrixA), parse(matrixB)), "A × B") }
-                                catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("A + B + C", Modifier.weight(1f)) {
-                                try {
-                                    val ab = math.add(parse(matrixA), parse(matrixB))
-                                    val res = if (ab != null) math.add(ab, parse(matrixC)) else null
-                                    showMatrixResult(res, "A + B + C")
-                                } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                            AdaptiveBtn("A − B − C", Modifier.weight(1f)) {
-                                try {
-                                    val ab = math.subtract(parse(matrixA), parse(matrixB))
-                                    val res = if (ab != null) math.subtract(ab, parse(matrixC)) else null
-                                    showMatrixResult(res, "A − B − C")
-                                } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                            AdaptiveBtn("A × B × C", Modifier.weight(1f)) {
-                                try {
-                                    val ab = math.multiply(parse(matrixA), parse(matrixB))
-                                    val res = if (ab != null) math.multiply(ab, parse(matrixC)) else null
-                                    showMatrixResult(res, "A × B × C")
-                                } catch (e: Exception) { lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom() }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF0B1322))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Скаляр k:", color = TextDim, fontSize = 12.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .width(64.dp)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(CardDark)
-                                    .border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                BasicTextField(
-                                    value = scalarK,
-                                    onValueChange = onScalarKChange,
-                                    textStyle = TextStyle(color = TextWhite, textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    cursorBrush = SolidColor(AccentCyan)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    try {
-                                        val k = scalarK.toDoubleOrNull() ?: 1.0
-                                        showMatrixResult(math.multiplyScalar(parse(currentData), k), "Умножение $k × $tabName")
-                                    } catch (e: Exception) {
-                                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                                    }
-                                },
-                                modifier = Modifier.weight(1f).height(36.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text("Вычислить k × $tabName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+    if (showFlowDialog) {
+        AlertDialog(
+            onDismissRequest = { showFlowDialog = false },
+            title = { Text("Анализ системы (Блок-схема)", color = TextWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Матрица A (${tauN}×$tauN) используется всегда.", color = TextDim, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { flowUseB = !flowUseB }) {
+                        Checkbox(checked = flowUseB, onCheckedChange = { flowUseB = it })
+                        Text("Матрица B (${tauN}×$tauM) введена", color = TextWhite, fontSize = 13.sp)
                     }
-
-                    1 -> {
-                        SectionHeader("Спектр и канонические формы матрицы [$tabName]")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("λ_i (Числа)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "Собственные числа λ_i ($tabName)"
-                                    val raw = parse(currentData)
-                                    val eig = math.eigenvalues(raw)
-                                    val text = eig.mapIndexed { idx, c -> "λ_${idx + 1} = $c" }.joinToString("\n")
-                                    resultScalarText = text
-                                    lastResultMatrix = null; lastResultGrid = null; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = text, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления λ_i"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("v_i (Векторы)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "Собственные и присоед. векторы ($tabName)"
-                                    val raw = parse(currentData)
-                                    val eig = math.eigenvalues(raw)
-                                    val vectorsInfo = math.eigenvectorsWithDetails(raw, eig)
-                                    val text = vectorsInfo.joinToString("\n\n") { info ->
-                                        val typeStr = if (info.isAssociated) {
-                                            "Присоединенный вектор (ур. ${info.chainLevel})"
-                                        } else {
-                                            "Собственный вектор"
-                                        }
-                                        "v_${info.index} (λ_${info.index} = ${info.lambda}) — $typeStr:\n" +
-                                                "  Ненормированный: ${info.canon}\n" +
-                                                "  Нормированный:   ${info.unit}"
-                                    }
-                                    resultScalarText = text
-                                    lastResultMatrix = null; lastResultGrid = null; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = text, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления векторов"; scrollToBottom()
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("ЖНФ (Комплексная)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "ЖНФ ($tabName)"
-                                    val raw = parse(currentData)
-                                    val (desc, jnfGrid) = math.jordanForm(raw)
-                                    resultScalarText = desc
-                                    lastResultGrid = jnfGrid.takeIf { it.isNotEmpty() }
-                                    lastResultMatrix = null
-                                    isError = jnfGrid.isEmpty()
-                                    if (!isError) {
-                                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = "$desc\n" + jnfGrid.joinToString("\n") { it.joinToString("\t") }, resultMatrix = null))
-                                    }
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultGrid = null; lastResultMatrix = null; isError = true
-                                    resultScalarText = e.message ?: "Не удалось вычислить ЖНФ"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("РЖНФ (Вещественная)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "РЖНФ ($tabName)"
-                                    val raw = parse(currentData)
-                                    val (desc, rjnfGrid) = math.realJordanForm(raw)
-                                    resultScalarText = desc
-                                    lastResultGrid = rjnfGrid.takeIf { it.isNotEmpty() }
-                                    lastResultMatrix = null
-                                    isError = rjnfGrid.isEmpty()
-                                    if (!isError) {
-                                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = "$desc\n" + rjnfGrid.joinToString("\n") { it.joinToString("\t") }, resultMatrix = null))
-                                    }
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultGrid = null; lastResultMatrix = null; isError = true
-                                    resultScalarText = e.message ?: "Не удалось вычислить РЖНФ"; scrollToBottom()
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("Многочлен p(λ)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "Характеристический многочлен p(λ)"
-                                    val coefficients = characteristicPolynomialCoefficients(parse(currentData))
-                                    val polynomial = formatCharacteristicPolynomial(coefficients)
-                                    resultScalarText = "p(λ) = $polynomial"
-                                    lastResultMatrix = null; lastResultGrid = null; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления p(λ)"; scrollToBottom()
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        SectionHeader("Устойчивость и критерии Калмана")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("Непрерывная Re(λ)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    lastResultTitle = "Устойчивость (непрерывная)"
-                                    val eigenvalues = math.eigenvalues(parse(currentData))
-                                    val maxReal = eigenvalues.maxOf { it.re }
-                                    val verdict = when {
-                                        maxReal < -1e-8 -> "✅ АСИМПТОТИЧЕСКИ УСТОЙЧИВА\nВсе Re(λ_i) < 0"
-                                        maxReal > 1e-8 -> "❌ НЕУСТОЙЧИВА\nСуществует Re(λ_i) > 0"
-                                        else -> "⚠️ ПОГРАНИЧНЫЙ СЛУЧАЙ\nЕсть корни на мнимой оси Re(λ) = 0"
-                                    }
-                                    val details = eigenvalues.mapIndexed { idx, v -> "λ_${idx + 1} = $v" }.joinToString("\n")
-                                    resultScalarText = "$verdict\n\nСпектр:\n$details"
-                                    lastResultMatrix = null; lastResultGrid = null; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка анализа устойчивости"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("Дискретная ρ(A)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    lastResultTitle = "Спектральный радиус ρ($tabName)"
-                                    val eigenvalues = math.eigenvalues(parse(currentData))
-                                    val spectralRadius = eigenvalues.maxOf { it.abs() }
-                                    val stabilityMessage = when {
-                                        spectralRadius < 1.0 - 1e-8 -> "✅ АСИМПТОТИЧЕСКИ УСТОЙЧИВА (|λ_i| < 1)"
-                                        spectralRadius > 1.0 + 1e-8 -> "❌ НЕУСТОЙЧИВА (существует |λ_i| > 1)"
-                                        else -> "⚠️ НА ГРАНИЦЕ ЕДИНИЧНОГО КРУГА (ρ ≈ 1)"
-                                    }
-                                    val details = eigenvalues.mapIndexed { idx, v -> "λ_${idx + 1} = $v" }.joinToString("\n")
-                                    resultScalarText = "ρ($tabName) = ${formatPreciseNumber(spectralRadius)}\n\n$stabilityMessage\n\nСпектр:\n$details"
-                                    lastResultMatrix = null; lastResultGrid = null; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления ρ(A)"; scrollToBottom()
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("Управляемость (A,B)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "Матрица управляемости W_c"
-                                    val matA = parse(matrixA); val matB = parse(matrixB)
-                                    val wc = math.controllability(matA, matB)
-                                    val r = math.rank(wc)
-                                    val state = if (r == matA.size) "✅ Система ПОЛНОСТЬЮ управляема" else "❌ Система НЕ управляема"
-                                    resultScalarText = "rank(W_c) = $r из ${matA.size}\n$state"
-                                    lastResultGrid = null; lastResultMatrix = wc; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = wc))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("Наблюдаемость (A,C)", Modifier.weight(1f), colorType = 2) {
-                                try {
-                                    lastResultTitle = "Матрица наблюдаемости W_o"
-                                    val matA = parse(matrixA); val matC = parse(matrixC)
-                                    val wo = math.observability(matA, matC)
-                                    val r = math.rank(wo)
-                                    val state = if (r == matA.size) "✅ Система ПОЛНОСТЬЮ наблюдаема" else "❌ Система НЕ наблюдаема"
-                                    resultScalarText = "rank(W_o) = $r из ${matA.size}\n$state"
-                                    lastResultGrid = null; lastResultMatrix = wo; isError = false
-                                    onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = wo))
-                                    scrollToBottom()
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка"; scrollToBottom()
-                                }
-                            }
-                        }
-                    }
-
-                    else -> {
-                        SectionHeader("Синтез регуляторов и канонические формы (ТАУ)")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("Фробениус (A,B)", Modifier.weight(1f), colorType = 2) {
-                                // Автоматически берем текущие матрицы A и первый столбец B с главного экрана
-                                frobSize = size
-                                frobSizeInput = size.toString()
-                                frobA = resizeMatrix(matrixA, size, size)
-                                frobB = List(size) { r -> listOf(matrixB.getOrNull(r)?.getOrNull(0) ?: "0") }
-                                showFrobeniusDialog = true
-                            }
-                            AdaptiveBtn("Модальное упр-е", Modifier.weight(1f), colorType = 2) {
-                                designSize = size
-                                designSizeInput = size.toString()
-                                val parsedB = runCatching { parse(matrixB) }.getOrNull()
-                                val activeCols = if (parsedB != null) {
-                                    val lastNZ = (size - 1 downTo 0).firstOrNull { col ->
-                                        (0 until size).any { row -> abs(parsedB[row][col]) > 1e-12 }
-                                    } ?: 0
-                                    (lastNZ + 1).coerceIn(1, size)
-                                } else 1
-                                designColsB = activeCols
-                                designA = resizeMatrix(matrixA, size, size)
-                                designB = resizeMatrix(matrixB, size, designColsB)
-                                val initEigs = runCatching { math.eigenvalues(parse(designA)) }.getOrDefault(emptyList())
-                                poleAssignments = List(size) { i -> initEigs.getOrNull(i)?.toString()?.replace(" ", "") ?: "-1" }
-                                showPolesDialog = true
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("LQR-оптимизация (Уравнение Риккати CARE)", Modifier.weight(1f), colorType = 2) {
-                                // Автоматически берем A, B (определяем число ненулевых столбцов m) и C (в Q) с главного экрана
-                                lqrN = size
-                                lqrNInput = size.toString()
-                                val parsedB = runCatching { parse(matrixB) }.getOrNull()
-                                val activeCols = if (parsedB != null) {
-                                    val lastNonZeroCol = (size - 1 downTo 0).firstOrNull { col ->
-                                        (0 until size).any { row -> abs(parsedB[row][col]) > 1e-12 }
-                                    } ?: 0
-                                    (lastNonZeroCol + 1).coerceIn(1, size)
-                                } else 1
-                                lqrM = activeCols
-                                lqrMInput = lqrM.toString()
-                                lqrAInput = resizeMatrix(matrixA, lqrN, lqrN)
-                                lqrBInput = resizeMatrix(matrixB, lqrN, lqrM)
-                                val parsedC = runCatching { parse(matrixC) }.getOrNull()
-                                val isZeroC = parsedC == null || parsedC.all { row -> row.all { abs(it) < 1e-12 } }
-                                lqrQInput = if (isZeroC) identityStringGrid(lqrN) else resizeMatrix(matrixC, lqrN, lqrN)
-                                lqrRInput = identityStringGrid(lqrM)
-                                showLqrDialog = true
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        SectionHeader("Высшие матричные функции от [$tabName]")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("e^$tabName", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    showMatrixResult(math.matrixExponential(parse(currentData)), "Экспонента e^$tabName")
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления e^A"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("ln($tabName)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    val res = math.matrixLog(parse(currentData))
-                                    if (res != null) {
-                                        showMatrixResult(res, "Логарифм ln($tabName)")
-                                    } else {
-                                        lastResultTitle = "Логарифм ln($tabName)"
-                                        lastResultMatrix = null; lastResultGrid = null; isError = true
-                                        resultScalarText = "Вещественный главный логарифм матрицы не существует (проверьте, что det($tabName) > 0 и нет отрицательных вещественных корней)."
-                                        scrollToBottom()
-                                    }
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления ln(A)"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("√$tabName", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    val res = math.matrixSqrt(parse(currentData))
-                                    if (res != null) {
-                                        showMatrixResult(res, "Корень √$tabName")
-                                    } else {
-                                        lastResultTitle = "Корень √$tabName"
-                                        lastResultMatrix = null; lastResultGrid = null; isError = true
-                                        resultScalarText = "Вещественный квадратный корень матрицы не существует."
-                                        scrollToBottom()
-                                    }
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления √A"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("${tabName}^k", Modifier.weight(1f), colorType = 1) { showPowerDialog = true }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            AdaptiveBtn("sin($tabName)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    showMatrixResult(math.matrixTrig(parse(currentData)).first, "Синус sin($tabName)")
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления sin(A)"; scrollToBottom()
-                                }
-                            }
-                            AdaptiveBtn("cos($tabName)", Modifier.weight(1f), colorType = 1) {
-                                try {
-                                    showMatrixResult(math.matrixTrig(parse(currentData)).second, "Косинус cos($tabName)")
-                                } catch (e: Exception) {
-                                    lastResultMatrix = null; lastResultGrid = null; isError = true
-                                    resultScalarText = e.message ?: "Ошибка вычисления cos(A)"; scrollToBottom()
-                                }
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { flowUseC = !flowUseC }) {
+                        Checkbox(checked = flowUseC, onCheckedChange = { flowUseC = it })
+                        Text("Матрица C (${tauK}×$tauN) введена", color = TextWhite, fontSize = 13.sp)
                     }
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        ResultCardBlock(
-            title = lastResultTitle,
-            lastResultMatrix = lastResultMatrix,
-            lastResultGrid = lastResultGrid,
-            resultScalarText = resultScalarText,
-            isError = isError,
-            screenWidth = screenWidth,
-            context = context,
-            onClearResult = {
-                lastResultMatrix = null
-                lastResultGrid = null
-                resultScalarText = ""
-                isError = false
             },
-            onTransferToA = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixAChange, mat, "A") },
-            onTransferToB = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixBChange, mat, "B") },
-            onTransferToC = { mat: Array<DoubleArray> -> transferSquareOrResize(onMatrixCChange, mat, "C") }
+            confirmButton = {
+                TextButton(onClick = {
+                    try {
+                        // Парсим матрицы (если пустые, они будут из нулей, и функция сама это поймет)
+                        val matA = parse(viewA)
+                        val matB = if (flowUseB) parse(viewB) else Array(matA.size) { DoubleArray(1) }
+                        val matC = if (flowUseC) parse(viewC) else Array(1) { DoubleArray(matA.size) }
+
+                        // Вызываем нашу мощную функцию, которая сразу возвращает готовый текст
+                        val report = math.fullBlockDiagramAnalysis(matA, matB, matC)
+
+                        lastResultTitle = "Полный анализ системы (Блок-схема)"
+                        resultScalarText = report
+                        lastResultGrid = null
+                        lastResultMatrix = null
+                        isError = false
+
+                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = null))
+                        showFlowDialog = false
+                        scrollToBottom()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, e.message ?: "Ошибка анализа", Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("Выполнить", color = AccentCyan, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { showFlowDialog = false }) { Text("Отмена", color = TextDim) } },
+            containerColor = CardDark
         )
     }
 
+
+
+    // --- ДИАЛОГ СТЕПЕНИ МАТРИЦЫ A^k ---
     if (showPowerDialog) {
+        val targetForSquareFunc = if (activeRows == activeCols) activeData else viewA
+        val targetName = if (activeRows == activeCols) tabName else "A"
         AlertDialog(
             onDismissRequest = { showPowerDialog = false },
             title = { Text("Степень матрицы", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold) },
@@ -1177,8 +1531,8 @@ fun SquareMatricesScreen(
                     val k = powerInput.toIntOrNull()
                     if (k != null && k in -100..1000) {
                         try {
-                            val res = math.matrixPower(parse(currentData), k)
-                            showMatrixResult(res, "Степень $tabName^$k")
+                            val res = math.matrixPower(parse(targetForSquareFunc), k)
+                            showMatrixResult(res, "Степень $targetName^$k")
                             showPowerDialog = false
                         } catch (e: Exception) {
                             Toast.makeText(context, e.message ?: "Ошибка возведения в степень", Toast.LENGTH_SHORT).show()
@@ -1195,21 +1549,7 @@ fun SquareMatricesScreen(
         )
     }
 
-    fun syncDialogToMain(newN: Int, newA: List<List<String>>, newB: List<List<String>>, newC: List<List<String>>? = null) {
-        if (size != newN) onSizeChange(newN)
-        onMatrixAChange(resizeMatrix(newA, newN, newN))
-        val mergedB = List(newN) { r ->
-            List(newN) { c ->
-                if (r < newB.size && c < newB[r].size) newB[r][c]
-                else matrixB.getOrNull(r)?.getOrNull(c) ?: "0"
-            }
-        }
-        onMatrixBChange(mergedB)
-        if (newC != null) {
-            onMatrixCChange(resizeMatrix(newC, newN, newN))
-        }
-    }
-
+    // --- ДИАЛОГ ФОРМЫ ФРОБЕНИУСА ---
     if (showFrobeniusDialog) {
         AlertDialog(
             onDismissRequest = { showFrobeniusDialog = false },
@@ -1240,19 +1580,19 @@ fun SquareMatricesScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         CounterButton("−", frobSize > 2) {
                             if (frobSize > 2) {
-                                frobSize--; frobSizeInput = frobSize.toString()
+                                frobSize--
                                 frobA = resizeMatrix(frobA, frobSize, frobSize)
                                 frobB = resizeMatrix(frobB, frobSize, 1)
-                                syncDialogToMain(frobSize, frobA, frobB)
+                                syncTauDialogToMain(frobSize, frobA, frobB)
                             }
                         }
                         Text("${frobSize}×$frobSize", color = TextWhite, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
                         CounterButton("+", frobSize < 7) {
                             if (frobSize < 7) {
-                                frobSize++; frobSizeInput = frobSize.toString()
+                                frobSize++
                                 frobA = resizeMatrix(frobA, frobSize, frobSize)
                                 frobB = resizeMatrix(frobB, frobSize, 1)
-                                syncDialogToMain(frobSize, frobA, frobB)
+                                syncTauDialogToMain(frobSize, frobA, frobB)
                             }
                         }
                     }
@@ -1262,7 +1602,7 @@ fun SquareMatricesScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     MatrixGridInput(frobSize, frobSize, frobA, AccentCyan, 46.dp, 13.sp) { r, c, v ->
                         frobA = frobA.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(frobSize, frobA, frobB)
+                        syncTauDialogToMain(frobSize, frobA, frobB)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -1270,14 +1610,14 @@ fun SquareMatricesScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     MatrixGridInput(frobSize, 1, frobB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
                         frobB = frobB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
-                        syncDialogToMain(frobSize, frobA, frobB)
+                        syncTauDialogToMain(frobSize, frobA, frobB)
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     try {
-                        syncDialogToMain(frobSize, frobA, frobB)
+                        syncTauDialogToMain(frobSize, frobA, frobB)
                         val a = parse(frobA)
                         val b = parse(frobB)
                         val res = math.frobeniusForm(a, b)
@@ -1295,7 +1635,7 @@ fun SquareMatricesScreen(
                             append(formatMatrixAligned(tMat))
                         }
                         lastResultGrid = null; lastResultMatrix = aTilde; isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = aTilde))
+                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = aTilde))
                         showFrobeniusDialog = false
                         scrollToBottom()
                     } catch (e: Exception) {
@@ -1308,6 +1648,7 @@ fun SquareMatricesScreen(
         )
     }
 
+    // --- ДИАЛОГ МОДАЛЬНОГО УПРАВЛЕНИЯ (АККЕРМАН + РАЗЛОЖЕНИЕ КАЛМАНА) ---
     if (showPolesDialog) {
         AlertDialog(
             onDismissRequest = { showPolesDialog = false },
@@ -1329,104 +1670,44 @@ fun SquareMatricesScreen(
 
                 Column(modifier = Modifier.heightIn(max = 580.dp).verticalScroll(rememberScrollState())) {
                     Text(
-                        "Система в реальном времени синхронизирована с главным экраном. Матрица B может иметь любую размерность n×m.",
+                        "Система в реальном времени синхронизирована с главным экраном.",
                         color = TextDim,
                         fontSize = 11.5.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF0B1322))
-                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
-                                .padding(vertical = 8.dp, horizontal = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("Состояния (n)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CounterButton("−", designSize > 2) {
-                                    if (designSize > 2) {
-                                        designSize--; designSizeInput = designSize.toString()
-                                        designA = resizeMatrix(designA, designSize, designSize)
-                                        designB = resizeMatrix(designB, designSize, designColsB)
-                                        poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
-                                        syncDialogToMain(designSize, designA, designB)
-                                    }
-                                }
-                                Text(
-                                    "$designSize",
-                                    color = AccentCyan,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp)
-                                )
-                                CounterButton("+", designSize < 7) {
-                                    if (designSize < 7) {
-                                        designSize++; designSizeInput = designSize.toString()
-                                        designA = resizeMatrix(designA, designSize, designSize)
-                                        designB = resizeMatrix(designB, designSize, designColsB)
-                                        poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
-                                        syncDialogToMain(designSize, designA, designB)
-                                    }
-                                }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Размер n:", color = TextWhite, fontWeight = FontWeight.SemiBold)
+                        CounterButton("−", designSize > 2) {
+                            if (designSize > 2) {
+                                designSize--
+                                designA = resizeMatrix(designA, designSize, designSize)
+                                designB = resizeMatrix(designB, designSize, 1)
+                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                syncTauDialogToMain(designSize, designA, designB)
                             }
                         }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF0B1322))
-                                .border(1.dp, Color(0xFF24334D), RoundedCornerShape(10.dp))
-                                .padding(vertical = 8.dp, horizontal = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text("Столбцов B (m)", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CounterButton("−", designColsB > 1) {
-                                    if (designColsB > 1) {
-                                        designColsB--
-                                        designB = resizeMatrix(designB, designSize, designColsB)
-                                        syncDialogToMain(designSize, designA, designB)
-                                    }
-                                }
-                                Text(
-                                    "$designColsB",
-                                    color = AccentPurple,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp)
-                                )
-                                CounterButton("+", designColsB < 7) {
-                                    if (designColsB < 7) {
-                                        designColsB++
-                                        designB = resizeMatrix(designB, designSize, designColsB)
-                                        syncDialogToMain(designSize, designA, designB)
-                                    }
-                                }
+                        Text("${designSize}×$designSize", color = TextWhite, fontWeight = FontWeight.Bold)
+                        CounterButton("+", designSize < 7) {
+                            if (designSize < 7) {
+                                designSize++
+                                designA = resizeMatrix(designA, designSize, designSize)
+                                designB = resizeMatrix(designB, designSize, 1)
+                                poleAssignments = List(designSize) { i -> poleAssignments.getOrElse(i) { "-1" } }
+                                syncTauDialogToMain(designSize, designA, designB)
                             }
                         }
                     }
-
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("A (${designSize}×${designSize})", color = AccentCyan, fontWeight = FontWeight.Bold)
                     MatrixGridInput(designSize, designSize, designA, AccentCyan, 42.dp, 12.sp) { r, c, v ->
                         designA = designA.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(designSize, designA, designB)
+                        syncTauDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("B (${designSize}×${designColsB}) — матрица входов", color = AccentPurple, fontWeight = FontWeight.Bold)
-                    MatrixGridInput(designSize, designColsB, designB, AccentPurple, 44.dp, 12.sp) { r, c, v ->
-                        designB = designB.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(designSize, designA, designB)
+                    Text("B (${designSize}×1)", color = AccentPurple, fontWeight = FontWeight.Bold)
+                    MatrixGridInput(designSize, 1, designB, AccentPurple, 46.dp, 13.sp) { r, _, v ->
+                        designB = designB.mapIndexed { i, row -> if (i == r) listOf(v) else row }
+                        syncTauDialogToMain(designSize, designA, designB)
                     }
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -1511,7 +1792,7 @@ fun SquareMatricesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     try {
-                        syncDialogToMain(designSize, designA, designB)
+                        syncTauDialogToMain(designSize, designA, designB)
                         val aForDesign = parse(designA)
                         val bForDesign = parse(designB)
                         val openEigs = math.eigenvalues(aForDesign)
@@ -1547,10 +1828,10 @@ fun SquareMatricesScreen(
                             appendLine("Спектр замкнутой системы A − BK:")
                             newSpectrum.forEachIndexed { idx, c -> appendLine("μ${toSubscript((idx + 1).toString())} = $c") }
                             appendLine()
-                            append("Матрица обратной связи K (${kMat.size}×${kMat[0].size}, u = −Kx):")
+                            append("Матрица обратной связи K (u = −Kx):")
                         }
                         isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))
+                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))
                         showPolesDialog = false
                         scrollToBottom()
                     } catch (e: Exception) {
@@ -1563,6 +1844,7 @@ fun SquareMatricesScreen(
         )
     }
 
+    // --- ДИАЛОГ LQR ОПТИМИЗАЦИИ ---
     if (showLqrDialog) {
         AlertDialog(
             onDismissRequest = { showLqrDialog = false },
@@ -1570,7 +1852,7 @@ fun SquareMatricesScreen(
             text = {
                 Column(modifier = Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState())) {
                     Text(
-                        "Матрица B может иметь любую размерность n×m (от 1 столбца до n×n). Данные синхронизируются с главным экраном.",
+                        "Матрица B (${lqrN}×$lqrM) напрямую синхронизирована с вкладкой ТАУ на главном экране!",
                         color = TextDim,
                         fontSize = 11.5.sp
                     )
@@ -1594,27 +1876,21 @@ fun SquareMatricesScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CounterButton("−", lqrN > 2) {
                                     if (lqrN > 2) {
-                                        lqrN--; lqrNInput = lqrN.toString()
+                                        lqrN--
                                         lqrAInput = resizeMatrix(lqrAInput, lqrN, lqrN)
                                         lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
                                         lqrQInput = resizeIdentityMatrix(lqrQInput, lqrN)
-                                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
+                                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                                     }
                                 }
-                                Text(
-                                    "$lqrN",
-                                    color = AccentCyan,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp)
-                                )
+                                Text("$lqrN", color = AccentCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
                                 CounterButton("+", lqrN < 7) {
                                     if (lqrN < 7) {
-                                        lqrN++; lqrNInput = lqrN.toString()
+                                        lqrN++
                                         lqrAInput = resizeMatrix(lqrAInput, lqrN, lqrN)
                                         lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
                                         lqrQInput = resizeIdentityMatrix(lqrQInput, lqrN)
-                                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
+                                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                                     }
                                 }
                             }
@@ -1634,73 +1910,41 @@ fun SquareMatricesScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 CounterButton("−", lqrM > 1) {
                                     if (lqrM > 1) {
-                                        lqrM--; lqrMInput = lqrM.toString()
+                                        lqrM--; tauM = lqrM
                                         lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
                                         lqrRInput = resizeIdentityMatrix(lqrRInput, lqrM)
+                                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                                     }
                                 }
-                                Text(
-                                    "$lqrM",
-                                    color = AccentPurple,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp)
-                                )
+                                Text("$lqrM", color = AccentPurple, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
                                 CounterButton("+", lqrM < 7) {
                                     if (lqrM < 7) {
-                                        lqrM++; lqrMInput = lqrM.toString()
+                                        lqrM++; tauM = lqrM
                                         lqrBInput = resizeMatrix(lqrBInput, lqrN, lqrM)
                                         lqrRInput = resizeIdentityMatrix(lqrRInput, lqrM)
+                                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                                     }
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            lqrN = size; lqrNInput = lqrN.toString()
-                            lqrM = size; lqrMInput = lqrM.toString()
-                            lqrAInput = resizeMatrix(matrixA, lqrN, lqrN)
-                            lqrBInput = resizeMatrix(matrixB, lqrN, lqrM)
-                            val parsedC = runCatching { parse(matrixC) }.getOrNull()
-                            val isZeroC = parsedC == null || parsedC.all { row -> row.all { abs(it) < 1e-12 } }
-                            lqrQInput = if (isZeroC) identityStringGrid(lqrN) else resizeMatrix(matrixC, lqrN, lqrN)
-                            lqrRInput = identityStringGrid(lqrM)
-                        },
-                        modifier = Modifier.fillMaxWidth().height(38.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF192841)),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.6f)),
-                        contentPadding = PaddingValues(horizontal = 8.dp)
-                    ) {
-                        Text(
-                            "📥 Взять полные A, B (${size}×$size), C с экрана",
-                            color = AccentCyan,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("A (${lqrN}×${lqrN})", color = AccentCyan, fontWeight = FontWeight.Bold)
                     MatrixGridInput(lqrN, lqrN, lqrAInput, AccentCyan, 42.dp, 12.sp) { r, c, v ->
                         lqrAInput = lqrAInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
+                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("B (${lqrN}×${lqrM}) — матрица входов", color = AccentPurple, fontWeight = FontWeight.Bold)
                     MatrixGridInput(lqrN, lqrM, lqrBInput, AccentPurple, 42.dp, 12.sp) { r, c, v ->
                         lqrBInput = lqrBInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
+                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Q (${lqrN}×${lqrN}, Q ≥ 0)", color = AccentAmber, fontWeight = FontWeight.Bold)
                     MatrixGridInput(lqrN, lqrN, lqrQInput, AccentAmber, 42.dp, 12.sp) { r, c, v ->
                         lqrQInput = lqrQInput.mapIndexed { i, row -> if (i == r) row.mapIndexed { j, old -> if (j == c) v else old } else row }
-                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("R (${lqrM}×${lqrM}, R > 0)", color = AccentPurple, fontWeight = FontWeight.Bold)
@@ -1712,7 +1956,8 @@ fun SquareMatricesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     try {
-                        syncDialogToMain(lqrN, lqrAInput, lqrBInput, lqrQInput)
+                        tauM = lqrM
+                        syncTauDialogToMain(lqrN, lqrAInput, lqrBInput)
                         val a = parse(lqrAInput)
                         val b = parse(lqrBInput)
                         val q = parse(lqrQInput)
@@ -1725,7 +1970,7 @@ fun SquareMatricesScreen(
                                 formatMatrixAligned(kMat) +
                                 "\n\nЗакон управления: u = −Kx"
                         lastResultGrid = null; lastResultMatrix = kMat; isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))
+                        addHistoryItem(HistoryItem(title = lastResultTitle, resultText = resultScalarText, resultMatrix = kMat))
                         showLqrDialog = false
                         scrollToBottom()
                     } catch (e: Exception) {
@@ -1735,421 +1980,6 @@ fun SquareMatricesScreen(
             },
             dismissButton = { TextButton(onClick = { showLqrDialog = false }) { Text("Отмена", color = TextDim) } },
             containerColor = CardDark
-        )
-    }
-}
-@Composable
-fun RectangularMatricesScreen(
-    selectedTab: Int, onTabChange: (Int) -> Unit,
-    rowsA: Int, colsA: Int, onSizeAChange: (Int, Int) -> Unit, matrixA: List<List<String>>, onMatrixAChange: (List<List<String>>) -> Unit,
-    rowsB: Int, colsB: Int, onSizeBChange: (Int, Int) -> Unit, matrixB: List<List<String>>, onMatrixBChange: (List<List<String>>) -> Unit,
-    scalarK: String, onScalarKChange: (String) -> Unit, onAddToHistory: (HistoryItem) -> Unit
-) {
-    val context = LocalContext.current
-    val configuration = LocalConfiguration.current
-    val math = remember { MatrixMath() }
-    val screenWidth = configuration.screenWidthDp.dp
-    val scrollState = rememberScrollState()
-    val coroutineScope = rememberCoroutineScope()
-
-    var lastResultTitle by remember { mutableStateOf("Результат") }
-    var lastResultMatrix by remember { mutableStateOf<Array<DoubleArray>?>(null) }
-    var resultScalarText by remember { mutableStateOf("") }
-    var isError by remember { mutableStateOf(false) }
-
-    fun scrollToBottom() {
-        coroutineScope.launch {
-            scrollState.animateScrollTo(scrollState.maxValue)
-        }
-    }
-
-    val curRows = if (selectedTab == 0) rowsA else rowsB
-    val curCols = if (selectedTab == 0) colsA else colsB
-    val currentData = if (selectedTab == 0) matrixA else matrixB
-    val currentAccent = if (selectedTab == 0) AccentCyan else AccentPurple
-    val tabName = if (selectedTab == 0) "A" else "B"
-
-    fun updateCurrent(updated: List<List<String>>) {
-        if (selectedTab == 0) onMatrixAChange(updated) else onMatrixBChange(updated)
-    }
-
-    val calculatedCellSize = ((screenWidth - 44.dp) / curCols).coerceIn(44.dp, 62.dp)
-    val cellFontSize = when {
-        curCols >= 6 -> 11.sp
-        curCols >= 5 -> 12.sp
-        calculatedCellSize < 54.dp -> 13.sp
-        else -> 16.sp
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-            .verticalScroll(scrollState),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(CardDark)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                MatrixSelectChip("A (${rowsA}×$colsA)", selectedTab == 0, AccentCyan, Modifier.weight(1f)) { onTabChange(0) }
-                MatrixSelectChip("B (${rowsB}×$colsB)", selectedTab == 1, AccentPurple, Modifier.weight(1f)) { onTabChange(1) }
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            FilledTonalButton(
-                onClick = {
-                    val tmpRows = rowsA; val tmpCols = colsA; val tmpMat = matrixA
-                    onSizeAChange(rowsB, colsB); onMatrixAChange(matrixB)
-                    onSizeBChange(tmpRows, tmpCols); onMatrixBChange(tmpMat)
-                    Toast.makeText(context, "A ⇄ B поменяны местами", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFF1E293B)),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Text("A ⇄ B", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Card(
-                modifier = Modifier.weight(1f),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp, horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Строк M:", color = TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CounterButton("−", curRows > 1) {
-                            if (curRows > 1) {
-                                if (selectedTab == 0) onSizeAChange(rowsA - 1, colsA) else onSizeBChange(rowsB - 1, colsB)
-                            }
-                        }
-                        Text("$curRows", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
-                        CounterButton("+", curRows < 7) {
-                            if (curRows < 7) {
-                                if (selectedTab == 0) onSizeAChange(rowsA + 1, colsA) else onSizeBChange(rowsB + 1, colsB)
-                            }
-                        }
-                    }
-                }
-            }
-            Card(
-                modifier = Modifier.weight(1f),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp, horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Столб. N:", color = TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CounterButton("−", curCols > 1) {
-                            if (curCols > 1) {
-                                if (selectedTab == 0) onSizeAChange(rowsA, colsA - 1) else onSizeBChange(rowsB, colsB - 1)
-                            }
-                        }
-                        Text("$curCols", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp))
-                        CounterButton("+", curCols < 7) {
-                            if (curCols < 7) {
-                                if (selectedTab == 0) onSizeAChange(rowsA, colsA + 1) else onSizeBChange(rowsB, colsB + 1)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            QuickActionChip("➔ Вектор-строка (1×3)", AccentCyan, Color(0xFF1E293B), Modifier.weight(1f)) {
-                if (selectedTab == 0) onSizeAChange(1, 3) else onSizeBChange(1, 3)
-            }
-            QuickActionChip("➔ Вектор-столбец (3×1)", AccentPurple, Color(0xFF1E293B), Modifier.weight(1f)) {
-                if (selectedTab == 0) onSizeAChange(3, 1) else onSizeBChange(3, 1)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        MatrixGridInput(
-            rows = curRows,
-            cols = curCols,
-            data = currentData,
-            accentColor = currentAccent,
-            cellSize = calculatedCellSize,
-            fontSize = cellFontSize,
-            onValueChange = { r, c, v ->
-                val updated = currentData.mapIndexed { ri, row ->
-                    if (ri == r) row.mapIndexed { ci, cur -> if (ci == c) v else cur } else row
-                }
-                updateCurrent(updated)
-            }
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            QuickActionChip("🎲 Рандом", TextWhite, Color(0xFF1E293B), Modifier.weight(1f)) {
-                updateCurrent(List(curRows) { List(curCols) { Random.nextInt(-9, 10).toString() } })
-            }
-            QuickActionChip("📋 Вставить", AccentCyan, AccentCyan.copy(alpha = 0.16f), Modifier.weight(1f)) {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                if (!clipText.isNullOrEmpty()) {
-                    val parsed = parsePastedText(clipText, curRows, curCols)
-                    if (parsed != null) {
-                        updateCurrent(parsed)
-                        Toast.makeText(context, "Вставлено в $tabName!", Toast.LENGTH_SHORT).show()
-                    } else Toast.makeText(context, "Не удалось распознать!", Toast.LENGTH_SHORT).show()
-                } else Toast.makeText(context, "Буфер пуст!", Toast.LENGTH_SHORT).show()
-            }
-            QuickActionChip("✕ Очистить", Color(0xFFF87171), Color(0xFF2A1621), Modifier.weight(1f)) {
-                updateCurrent(List(curRows) { List(curCols) { "0" } })
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(CardDark.copy(alpha = 0.7f))
-                .border(1.dp, Color(0xFF1F2D46), RoundedCornerShape(16.dp))
-                .padding(12.dp)
-        ) {
-            SectionHeader("Матричные и векторные операции над A и B")
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdaptiveBtn("A × B", Modifier.weight(1f), colorType = 1) {
-                    try {
-                        lastResultTitle = "Умножение A × B"
-                        if (colsA != rowsB) {
-                            lastResultMatrix = null
-                            resultScalarText = "Нельзя умножить!\nЧисло столбцов A ($colsA) должно совпадать с числом строк B ($rowsB)."
-                            isError = true
-                        } else {
-                            val res = math.multiply(parse(matrixA), parse(matrixB))
-                            lastResultMatrix = res; resultScalarText = ""; isError = res == null
-                            if (res != null) onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(res), resultMatrix = res))
-                        }
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-                AdaptiveBtn("A + B", Modifier.weight(1f)) {
-                    try {
-                        lastResultTitle = "Сложение A + B"
-                        if (rowsA != rowsB || colsA != colsB) {
-                            lastResultMatrix = null
-                            resultScalarText = "Нельзя сложить!\nРазмеры A (${rowsA}×$colsA) и B (${rowsB}×$colsB) не совпадают."
-                            isError = true
-                        } else {
-                            val res = math.add(parse(matrixA), parse(matrixB))
-                            lastResultMatrix = res; resultScalarText = ""; isError = res == null
-                            if (res != null) onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(res), resultMatrix = res))
-                        }
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-                AdaptiveBtn("A − B", Modifier.weight(1f)) {
-                    try {
-                        lastResultTitle = "Вычитание A − B"
-                        if (rowsA != rowsB || colsA != colsB) {
-                            lastResultMatrix = null
-                            resultScalarText = "Нельзя вычесть!\nРазмеры A (${rowsA}×$colsA) и B (${rowsB}×$colsB) не совпадают."
-                            isError = true
-                        } else {
-                            val res = math.subtract(parse(matrixA), parse(matrixB))
-                            lastResultMatrix = res; resultScalarText = ""; isError = res == null
-                            if (res != null) onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(res), resultMatrix = res))
-                        }
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdaptiveBtn("a · b (Скалярное)", Modifier.weight(1f), colorType = 2) {
-                    try {
-                        lastResultTitle = "Скалярное произведение a · b"
-                        val totalA = rowsA * colsA; val totalB = rowsB * colsB
-                        if (totalA != totalB) {
-                            lastResultMatrix = null
-                            resultScalarText = "Ошибка! У векторов должно быть равное количество элементов ($totalA ≠ $totalB)."
-                            isError = true
-                        } else {
-                            val dot = math.dotProduct(parse(matrixA), parse(matrixB))
-                            val txt = "a · b = ${formatNumber(dot ?: 0.0)}"
-                            lastResultMatrix = null; resultScalarText = txt; isError = false
-                            onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                        }
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-                AdaptiveBtn("a ⨯ b (Векторное 3D)", Modifier.weight(1f), colorType = 2) {
-                    try {
-                        lastResultTitle = "Векторное произведение a ⨯ b"
-                        val totalA = rowsA * colsA; val totalB = rowsB * colsB
-                        if (totalA != 3 || totalB != 3) {
-                            lastResultMatrix = null
-                            resultScalarText = "Векторное произведение существует только для 3D векторов (3 элемента)!"
-                            isError = true
-                        } else {
-                            val cross = math.crossProduct(parse(matrixA), parse(matrixB))
-                            lastResultMatrix = cross; resultScalarText = ""; isError = cross == null
-                            if (cross != null) onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(cross), resultMatrix = cross))
-                        }
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            SectionHeader("Свойства выбранной матрицы [$tabName]")
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                AdaptiveBtn("${tabName}ᵀ (Трансп.)", Modifier.weight(1f)) {
-                    try {
-                        lastResultTitle = "Транспонирование ${tabName}ᵀ"
-                        val res = math.transpose(parse(currentData))
-                        lastResultMatrix = res; resultScalarText = ""; isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(res), resultMatrix = res))
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-                AdaptiveBtn("Rank($tabName)", Modifier.weight(1f)) {
-                    try {
-                        lastResultTitle = "Ранг rank($tabName)"
-                        val res = math.rank(parse(currentData))
-                        val txt = "rank($tabName) = $res"
-                        lastResultMatrix = null; resultScalarText = txt; isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-                AdaptiveBtn("Норма ‖$tabName‖", Modifier.weight(1f)) {
-                    try {
-                        lastResultTitle = "Норма ‖$tabName‖"
-                        val norm = math.norm(parse(currentData))
-                        val txt = "‖$tabName‖ = ${formatNumber(norm)}"
-                        lastResultMatrix = null; resultScalarText = txt; isError = false
-                        onAddToHistory(HistoryItem(title = lastResultTitle, resultText = txt, resultMatrix = null))
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF0B1322))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Скаляр k:", color = TextDim, fontSize = 12.sp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .width(64.dp)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(CardDark)
-                        .border(1.dp, Color(0xFF24334D), RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    BasicTextField(
-                        value = scalarK,
-                        onValueChange = onScalarKChange,
-                        textStyle = TextStyle(color = TextWhite, textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        cursorBrush = SolidColor(AccentCyan)
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        try {
-                            lastResultTitle = "Умножение $scalarK × $tabName"
-                            val k = scalarK.toDoubleOrNull() ?: 1.0
-                            val res = math.multiplyScalar(parse(currentData), k)
-                            lastResultMatrix = res; resultScalarText = ""; isError = false
-                            onAddToHistory(HistoryItem(title = lastResultTitle, resultText = formatMatrixRaw(res), resultMatrix = res))
-                            scrollToBottom()
-                        } catch (e: Exception) {
-                            lastResultMatrix = null; resultScalarText = e.message ?: "Ошибка"; isError = true; scrollToBottom()
-                        }
-                    },
-                    modifier = Modifier.weight(1f).height(36.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Вычислить k × $tabName", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        ResultCardBlock(
-            title = lastResultTitle,
-            lastResultMatrix = lastResultMatrix,
-            lastResultGrid = null,
-            resultScalarText = resultScalarText,
-            isError = isError,
-            screenWidth = screenWidth,
-            context = context,
-            onClearResult = {
-                lastResultMatrix = null
-                resultScalarText = ""
-                isError = false
-            },
-            onTransferToA = { mat: Array<DoubleArray> -> onSizeAChange(mat.size, mat[0].size); onMatrixAChange(matrixToPreciseStringList(mat)) },
-            onTransferToB = { mat: Array<DoubleArray> -> onSizeBChange(mat.size, mat[0].size); onMatrixBChange(matrixToPreciseStringList(mat)) },
-            onTransferToC = null
         )
     }
 }
@@ -2231,7 +2061,7 @@ fun CategoryPill(
 ) {
     Box(
         modifier = modifier
-            .height(38.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (selected) accent.copy(alpha = 0.22f) else Color.Transparent)
             .border(1.dp, if (selected) accent else Color.Transparent, RoundedCornerShape(10.dp))
@@ -2241,7 +2071,7 @@ fun CategoryPill(
         Text(
             text = text,
             color = if (selected) TextWhite else TextDim,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -2481,28 +2311,6 @@ fun CounterButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun TabButton(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) AccentCyan.copy(alpha = 0.2f) else Color.Transparent)
-            .border(if (selected) 1.dp else 0.dp, if (selected) AccentCyan else Color.Transparent, RoundedCornerShape(10.dp))
-            .clickable { onClick() }
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text,
-            color = if (selected) AccentCyan else TextDim,
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
 fun MatrixGridInput(
     rows: Int,
     cols: Int,
@@ -2602,8 +2410,8 @@ fun ResultCardBlock(
     onTransferToC: ((Array<DoubleArray>) -> Unit)? = null
 ) {
     val hasResult = lastResultMatrix != null || lastResultGrid != null || resultScalarText.isNotEmpty()
-    var symbolicMode by remember { mutableStateOf(false) }
-    val alreadyHasFormattedMatrixInText = resultScalarText.contains("⎡") || resultScalarText.contains("⎣")
+    var symbolicMode by remember { mutableStateOf(true) }
+    val alreadyHasFormattedMatrixInText = resultScalarText.contains("⎡") || resultScalarText.contains("⎣") || resultScalarText.contains("│")
 
     val displayedScalarText = remember(resultScalarText, symbolicMode) {
         prettifyMathText(resultScalarText)
@@ -2614,7 +2422,7 @@ fun ResultCardBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 6.dp, bottom = 28.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = if (isError) Color(0xFF331016) else CardDark),
             border = BorderStroke(1.2.dp, if (isError) Color(0xFFEF4444) else AccentEmerald)
         ) {
@@ -2628,7 +2436,7 @@ fun ResultCardBlock(
                         text = if (isError) "⚠️ Ошибка" else "✅ ${prettifyMathText(title)}",
                         color = if (isError) Color(0xFFFCA5A5) else AccentEmerald,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -2639,11 +2447,7 @@ fun ResultCardBlock(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
                                     .background(if (symbolicMode) AccentCyan.copy(alpha = 0.22f) else Color(0xFF1E293B))
-                                    .border(
-                                        1.dp,
-                                        if (symbolicMode) AccentCyan else Color(0xFF334155),
-                                        RoundedCornerShape(7.dp)
-                                    )
+                                    .border(1.dp, if (symbolicMode) AccentCyan else Color(0xFF334155), RoundedCornerShape(7.dp))
                                     .clickable { symbolicMode = !symbolicMode }
                                     .padding(horizontal = 9.dp, vertical = 5.dp)
                             ) {
@@ -2662,7 +2466,7 @@ fun ResultCardBlock(
                                 .clickable {
                                     val txt = when {
                                         lastResultGrid != null -> displayedScalarText + "\n" + lastResultGrid.joinToString("\n") { it.joinToString("\t") }
-                                        displayedScalarText.isNotEmpty() && alreadyHasFormattedMatrixInText -> displayedScalarText
+                                        displayedScalarText.isNotEmpty() -> displayedScalarText
                                         lastResultMatrix != null -> formatMatrixRaw(lastResultMatrix, symbolicMode)
                                         else -> displayedScalarText
                                     }
@@ -2686,23 +2490,21 @@ fun ResultCardBlock(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 if (displayedScalarText.isNotEmpty()) {
-                    Text(
-                        displayedScalarText,
-                        color = TextWhite,
-                        fontSize = 13.5.sp,
-                        fontFamily = FontFamily.Monospace,
-                        lineHeight = 20.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    RichReportComposeView(displayedScalarText, screenWidth)
                 }
 
                 if (lastResultGrid != null) {
                     FormattedTableGrid(lastResultGrid)
                 } else if (lastResultMatrix != null && !alreadyHasFormattedMatrixInText) {
-                    MatrixResultGridAdaptive(lastResultMatrix, screenWidth, symbolicMode, isExpMode = title.contains("Экспонента"))
+                    MatrixResultGridAdaptive(
+                        matrix = lastResultMatrix,
+                        screenWidth = screenWidth,
+                        symbolicMode = symbolicMode,
+                        isExpMode = title.contains("Экспонента")
+                    )
                 }
 
                 if (lastResultMatrix != null && !isError) {
@@ -2743,6 +2545,125 @@ fun ResultCardBlock(
                             ) { Text("➔ в C", color = AccentAmber, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Умный PRO-рендерер математического отчёта:
+ * Превращает текстовые секции, матрицы со скобками ⎡ ⎢ ⎣ и выводы в красивые UI-карточки и таблицы с дробями!
+ */
+@Composable
+fun RichReportComposeView(reportText: String, screenWidth: Dp) {
+    val sections = remember(reportText) {
+        reportText.split(Regex("[═─]{6,}")).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        sections.forEach { sec ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Color(0xFF0C1424))
+                    .border(1.dp, Color(0xFF1F2E47), RoundedCornerShape(13.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val lines = sec.lines()
+                var i = 0
+                while (i < lines.size) {
+                    val line = lines[i].trim()
+                    if (line.isEmpty()) { i++; continue }
+
+                    // 1. Проверяем, начинается ли здесь блок матрицы (⎡, ⎢, ⎣, │ или одиночная матрица [ ... ])
+                    val isMatLine = { s: String ->
+                        val t = s.trim()
+                        t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
+                                (t.startsWith("[") && t.endsWith("]") && !t.contains(";") && !t.contains("ᵀ"))
+                    }
+
+                    if (isMatLine(line)) {
+                        val matRows = mutableListOf<DoubleArray>()
+                        while (i < lines.size && isMatLine(lines[i])) {
+                            val rawRow = lines[i].trim()
+                                .removePrefix("⎡").removePrefix("⎢").removePrefix("⎣").removePrefix("│").removePrefix("[")
+                                .removeSuffix("⎤").removeSuffix("⎥").removeSuffix("⎦").removeSuffix("│").removeSuffix("]")
+                                .trim()
+                            val nums = rawRow.split(Regex("\\s+")).mapNotNull { parseSmartCell(it) }.toDoubleArray()
+                            if (nums.isNotEmpty()) matRows.add(nums)
+                            i++
+                        }
+                        if (matRows.isNotEmpty()) {
+                            MatrixResultGridAdaptive(
+                                matrix = matRows.toTypedArray(),
+                                screenWidth = screenWidth,
+                                symbolicMode = true,
+                                isExpMode = false
+                            )
+                        }
+                        continue
+                    }
+
+                    // 2. Заголовки шагов
+                    if (line.matches(Regex("^\\d+\\).*")) || line.endsWith("СИСТЕМА В ПРОСТРАНСТВЕ СОСТОЯНИЙ:") ||
+                        line.startsWith("ПОСТРОЕНИЕ ") || line.startsWith("ИТОГОВЫЙ ВЫВОД")
+                    ) {
+                        Text(
+                            text = line,
+                            color = AccentCyan,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+                        )
+                    }
+                    // 3. Плашки выводов (➔ Вывод, ✅, ❌, ⚠️)
+                    else if (line.startsWith("➔") || line.startsWith("✅") || line.startsWith("❌") || line.startsWith("⚠️")) {
+                        val isBad = line.contains("НЕ ") || line.startsWith("❌")
+                        val isGood = line.contains("СТАБИЛИЗИРУЕМА") || line.contains("ДЕТЕКТИРУЕМА") || line.contains("полностью") || line.startsWith("✅")
+                        val badgeColor = when {
+                            isBad -> Color(0xFFF87171)
+                            isGood -> AccentEmerald
+                            else -> AccentAmber
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(badgeColor.copy(alpha = 0.13f))
+                                .border(1.dp, badgeColor.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                        ) {
+                            Text(text = line, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                        }
+                    }
+                    // 4. Выделенная плашка закона управления u = Θx = ...
+                    else if (line.startsWith("u =") || line.startsWith("λ =")) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(AccentPurple.copy(alpha = 0.14f))
+                                .border(1.dp, AccentPurple.copy(alpha = 0.5f), RoundedCornerShape(9.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(text = line, color = TextWhite, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    // 5. Подписи к матрицам и обычные строки
+                    else {
+                        val isLabel = line.endsWith(":")
+                        Text(
+                            text = line,
+                            color = if (isLabel) AccentAmber else TextWhite,
+                            fontWeight = if (isLabel) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+                    i++
                 }
             }
         }
@@ -2956,13 +2877,10 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
     val signStr = if (value < 0) "−" else ""
     val absVal = abs(value)
 
-    // 1. Простые точные дроби со знаменателем до 16 (1/2, 1/3, 1/4 и т.д.)
     findExactFraction(absVal, maxQ = 16L, tol = 1e-6)?.let { (p, q) ->
         return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
     }
 
-    // 2. Формулы с экспонентой e^k ИЩЕМ ТОЛЬКО тогда, когда нажата кнопка "Экспонента e^A"!
-    // Чтобы в LQR или A^-1 никогда случайно не появлялась буква e!
     if (isExpMode) {
         val powers = (1..25).toList() + (-1 downTo -15).toList()
         for (k in powers) {
@@ -3003,7 +2921,6 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
             }
         }
 
-        // Комбинации двух разных степеней e: (a * e^k1 + b * e^k2) / q
         val smallPowers = listOf(1, 2, 3, 4, 5, 6, 7, 8, -1, -2, -3)
         for (i in smallPowers.indices) {
             for (j in i + 1 until smallPowers.size) {
@@ -3033,7 +2950,6 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
         }
     }
 
-    // 3. Корни и квадратичные иррациональности вида (a * √d + b) / q (например: √3, 1+√2, (1+√5)/2)
     for (rad in listOf(2, 3, 5, 6, 7)) {
         val rVal = kotlin.math.sqrt(rad.toDouble())
         val rStr = "√$rad"
@@ -3070,7 +2986,6 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
         }
     }
 
-    // 4. Все остальные рациональные дроби со знаменателем до 9999
     findExactFraction(absVal, maxQ = 9999L, tol = 1e-3)?.let { (p, q) ->
         return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
     }
@@ -3220,6 +3135,40 @@ fun formatCharacteristicPolynomial(coefficients: List<Double>): String {
     return terms.joinToString("")
 }
 
+/**
+ * Автоматически определяет размерность вставляемой матрицы (строки × столбцы от 1 до 7)
+ * по строкам и числам из буфера обмена, чтобы не нужно было менять размер вручную!
+ */
+fun parsePastedTextAutoSize(text: String): List<List<String>>? {
+    try {
+        val normalized = text
+            .replace('−', '-')
+            .replace('–', '-')
+            .replace('—', '-')
+            .replace(',', '.')
+            .replace("[", "\n")
+            .replace("]", "\n")
+            .replace("⎡", "\n").replace("⎢", "\n").replace("⎣", "\n")
+            .replace("⎤", "\n").replace("⎥", "\n").replace("⎦", "\n")
+            .trim()
+        val numberRegex = Regex("[+-]?(?:\\d+(?:/\\d+|\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?")
+        val rowsWithNums = normalized.lines()
+            .map { line -> numberRegex.findAll(line).map { it.value }.toList() }
+            .filter { it.isNotEmpty() }
+
+        if (rowsWithNums.isEmpty()) return null
+        val detectedRows = rowsWithNums.size.coerceIn(1, 7)
+        val detectedCols = rowsWithNums.maxOf { it.size }.coerceIn(1, 7)
+
+        return List(detectedRows) { r ->
+            List(detectedCols) { c ->
+                rowsWithNums.getOrNull(r)?.getOrNull(c) ?: "0"
+            }
+        }
+    } catch (_: Exception) {
+        return null
+    }
+}
 fun parsePastedText(text: String, reqRows: Int, reqCols: Int): List<List<String>>? {
     try {
         val normalized = text
