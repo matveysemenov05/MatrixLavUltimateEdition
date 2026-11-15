@@ -1835,28 +1835,112 @@ function formatNumber(v, dec = 3) {
   return Number(v.toFixed(dec)).toString();
 }
 
-function toSymbolicToken(value, isExpMode = false) {
+function toSuperscriptStr(str) {
+  const map = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','−':'⁻' };
+  return String(str).split('').map(c => map[c] || c).join('');
+}
+
+function gcdNum(a0, b0) {
+  let a = Math.abs(Math.round(a0)), b = Math.abs(Math.round(b0));
+  while (b !== 0) { const t = a % b; a = b; b = t; }
+  return a === 0 ? 1 : a;
+}
+
+function toSymbolicToken(value, isExpMode = false, isSqrtMode = false, fromText = false) {
   if (!Number.isFinite(value)) return { plainText: String(value) };
   if (Math.abs(value) < 1e-9) return { plainText: "0" };
-  const near = Math.round(value);
-  if (Math.abs(value - near) < 1e-6) return { plainText: String(near) };
 
-  const ax = Math.abs(value), sign = value < 0 ? "−" : "";
-  // Ищем только красивые дроби со знаменателем до 36 (1/2, 3/2, 10/3, 5/3 и т.д.),
-  // чтобы иррациональные числа в LQR и cos(A) не превращались в 48214/125!
-  let h1 = 1, h2 = 0, k1 = 0, k2 = 1, b = ax;
-  for (let s = 0; s < 12; s++) {
-    const a = Math.floor(b);
-    const h = a * h1 + h2, k = a * k1 + k2;
-    if (k > 36) break;
-    h2 = h1; h1 = h; k2 = k1; k1 = k;
-    const rem = b - a;
-    if (rem < 1e-10) break;
-    b = 1 / rem;
+  const nearestInt = Math.round(value);
+  if (Math.abs(value - nearestInt) < 1e-5 && Math.abs(nearestInt) < 1e9) {
+    return { plainText: String(nearestInt) };
   }
-  if (k1 > 1 && Math.abs(ax - h1 / k1) <= 1e-5 * Math.max(1, ax)) {
-    return { isFraction: true, sign, num: String(h1), den: String(k1) };
+
+  // Поиск цепной дроби с проверкой ВНУТРИ цикла (останавливается на первой же простой дроби!)
+  function findFraction(x, maxQ, tol) {
+    const ax = Math.abs(x);
+    if (ax < 1e-7 || ax > 1e7) return null;
+    let h1 = 1, h2 = 0, k1 = 0, k2 = 1, b = ax;
+    for (let step = 0; step < 20; step++) {
+      const a = Math.floor(b);
+      const h = a * h1 + h2;
+      const k = a * k1 + k2;
+      if (k > maxQ) break;
+      h2 = h1; h1 = h; k2 = k1; k1 = k;
+      if (k1 > 1 && h1 > 0) {
+        const relErr = Math.abs(ax - h1 / k1) / Math.max(1.0, ax);
+        if (relErr <= tol) return [h1, k1];
+      }
+      const rem = b - a;
+      if (rem < 1e-11) break;
+      b = 1.0 / rem;
+    }
+    return null;
   }
+
+  const signStr = value < 0 ? "−" : "";
+  const absVal = Math.abs(value);
+
+  // 1. Сначала ищем короткие дроби (знаменатель до 36: 1/2, 1/3, 10/3, 5/3 и т.д.),
+  // а для точных матриц (например, Обратная матрица A⁻¹) — точные дроби со знаменателем до 9999!
+  const frac = (!isExpMode && !isSqrtMode ? findFraction(absVal, 36, 6e-4) : null) ||
+               (!fromText ? findFraction(absVal, 9999, 1e-9) : null);
+  if (frac) {
+    return { isFraction: true, sign: signStr, num: String(frac[0]), den: String(frac[1]), suffix: "" };
+  }
+
+  // 2. Распознавание экспонент e^k (для e^A)
+  if (isExpMode) {
+    const powers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1, -2, -3, -4, -5];
+    for (const k of powers) {
+      const ePow = Math.exp(k);
+      const eStr = k === 1 ? "e" : "e" + toSuperscriptStr(k);
+      for (let q = 1; q <= 12; q++) {
+        const scaled = value * q;
+        for (let a = -12; a <= 12; a++) {
+          if (a === 0) continue;
+          const b = Math.round(scaled - a * ePow);
+          if (Math.abs(b) > 12) continue;
+          const approx = (a * ePow + b) / q;
+          if (Math.abs(value - approx) / Math.max(1.0, Math.abs(value)) <= 1e-4) {
+            const g = gcdNum(gcdNum(a, b), q);
+            const a1 = a / g, b1 = b / g, q1 = q / g;
+            const aTerm = a1 === 1 ? eStr : a1 === -1 ? "−" + eStr : a1 + eStr;
+            const expr = b1 === 0 ? aTerm : b1 > 0 ? `${aTerm}+${b1}` : `${aTerm}−${Math.abs(b1)}`;
+            if (q1 === 1) return { plainText: expr };
+            if (b1 === 0) return { isFraction: true, sign: a1 < 0 ? "−" : "", num: String(Math.abs(a1)), den: String(q1), suffix: eStr };
+            return { isFraction: true, sign: "", num: expr, den: String(q1), suffix: "" };
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Распознавание корней (только для Корень √A)
+  if (isSqrtMode) {
+    for (const rad of [2, 3, 5, 6, 7]) {
+      const rVal = Math.sqrt(rad);
+      const rStr = "√" + rad;
+      for (let q = 1; q <= 12; q++) {
+        const scaled = value * q;
+        for (let a = -12; a <= 12; a++) {
+          if (a === 0) continue;
+          const b = Math.round(scaled - a * rVal);
+          if (Math.abs(b) > 12) continue;
+          const approx = (a * rVal + b) / q;
+          if (Math.abs(value - approx) / Math.max(1.0, Math.abs(value)) <= 1e-5) {
+            const g = gcdNum(gcdNum(a, b), q);
+            const a1 = a / g, b1 = b / g, q1 = q / g;
+            const aTerm = a1 === 1 ? rStr : a1 === -1 ? "−" + rStr : a1 + rStr;
+            const expr = b1 === 0 ? aTerm : `${b1}+${aTerm}`.replace("+-", "−").replace("+−", "−");
+            if (q1 === 1) return { plainText: expr };
+            if (b1 === 0) return { isFraction: true, sign: a1 < 0 ? "−" : "", num: String(Math.abs(a1)), den: String(q1), suffix: rStr };
+            return { isFraction: true, sign: "", num: expr, den: String(q1), suffix: "" };
+          }
+        }
+      }
+    }
+  }
+
   return { plainText: formatNumber(value) };
 }
 
@@ -1908,8 +1992,8 @@ function characteristicPolynomialString(mat) {
 // СОСТОЯНИЕ ИНТЕРФЕЙСА И РЕНДЕРИНГ
 // ============================================================================
 const state = {
-  mainTab: 0, // 0 = Алгебра, 1 = ТАУ
-  selTab: 0,  // 0 = A, 1 = B, 2 = C
+  mainTab: 0,
+  selTab: 0,
   algDim: [{ r: 3, c: 3 }, { r: 3, c: 3 }, { r: 3, c: 3 }],
   tauN: 3, tauM: 1, tauK: 1,
   matrices: [
@@ -1939,6 +2023,7 @@ function getDims(idx = state.selTab) {
   if (idx === 1) return { r: state.tauN, c: state.tauM };
   return { r: state.tauK, c: state.tauN };
 }
+
 function getParsedMatrix(idx = state.selTab) {
   const { r, c } = getDims(idx);
   return Array.from({ length: r }, (_, i) =>
@@ -2011,9 +2096,6 @@ function transferToTarget(targetIdx, mat) {
   showToast(`Перенесено в ${["A", "B", "C"][targetIdx]} (${r}×${c})`);
 }
 
-// ============================================================================
-// ОТРИСОВКА ИНТЕРФЕЙСА
-// ============================================================================
 function renderAll() {
   document.getElementById("historyCount").textContent = state.history.length;
   document.getElementById("tabMain0").className = "cat-pill" + (state.mainTab === 0 ? " active-cyan" : "");
@@ -2144,7 +2226,7 @@ function swapMatrices(i1, i2) {
   showToast("Матрицы обменяны!");
 }
 
- function renderOperationsPanel() {
+function renderOperationsPanel() {
   const panel = document.getElementById("operationsPanel");
   const name = ["A", "B", "C"][state.selTab];
   const { r, c } = getDims();
@@ -2234,18 +2316,24 @@ function swapMatrices(i1, i2) {
   }
 }
 
-function parseRichSectionHtml(reportText, symbolic = false) {
+function renderSymbolicCellHtml(v, symbolic, isExpMode, fromText = false) {
+  if (!symbolic) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
+  const isSqrtMode = state.resTitle.includes("Корень") || state.resTitle.includes("√");
+  const t = toSymbolicToken(v, isExpMode, isSqrtMode, fromText);
+  if (!t.isFraction) {
+    const isSpec = t.plainText.includes("e") || t.plainText.includes("√");
+    return `<div class="res-grid-cell" style="${isSpec ? 'color:var(--cyan);font-weight:800;' : ''}">${t.plainText}</div>`;
+  }
+  const sfx = t.suffix ? `<span style="color:var(--amber);font-weight:800;margin-left:2px;">${t.suffix}</span>` : "";
+  return `<div class="res-grid-cell"><span class="frac-box">${t.sign || ""}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span>${sfx}</span></div>`;
+}
+
+function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
   const sections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
   const isMatLine = (s) => {
     const t = s.trim();
     return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
       (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
-  };
-  const renderCell = (v) => {
-    if (!symbolic) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
-    const t = toSymbolicToken(v);
-    if (!t.isFraction) return `<div class="res-grid-cell">${t.plainText}</div>`;
-    return `<div class="res-grid-cell"><span class="frac-box">${t.sign}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span></span></div>`;
   };
 
   return sections.map(sec => {
@@ -2268,7 +2356,7 @@ function parseRichSectionHtml(reportText, symbolic = false) {
           html += `<div class="matrix-scroll" style="margin:6px 0;"><div class="matrix-bracket-wrap">
             <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
             <div class="matrix-grid">` +
-            rows.map(r => `<div class="matrix-grid-row">` + r.map(renderCell).join("") + `</div>`).join("") +
+            rows.map(r => `<div class="matrix-grid-row">` + r.map(v => renderSymbolicCellHtml(v, symbolic, isExpMode, true)).join("") + `</div>`).join("") +
             `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
         }
         continue;
@@ -2300,6 +2388,7 @@ function renderResultCard() {
   if (!state.resText && !state.resMatrix && !state.resGrid) { box.innerHTML = ""; return; }
   const hasEmbeddedMatrices = state.resText.includes("⎡") || state.resText.includes("│") || state.resText.includes("══");
   const showSymbolicToggle = !state.isError && (state.resMatrix !== null || hasEmbeddedMatrices);
+  const isExpMode = state.resTitle.includes("Экспонента") || state.resTitle.includes("e^");
 
   let matHtml = "";
   if (state.resGrid) {
@@ -2310,12 +2399,7 @@ function renderResultCard() {
     matHtml = `<div class="matrix-scroll"><div class="matrix-bracket-wrap">
       <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
       <div class="matrix-grid">` +
-      state.resMatrix.map(row => `<div class="matrix-grid-row">` + row.map(v => {
-        if (!state.symbolicMode) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
-        const t = toSymbolicToken(v);
-        if (!t.isFraction) return `<div class="res-grid-cell">${t.plainText}</div>`;
-        return `<div class="res-grid-cell"><span class="frac-box">${t.sign}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span></span></div>`;
-      }).join("") + `</div>`).join("") +
+      state.resMatrix.map(row => `<div class="matrix-grid-row">` + row.map(v => renderSymbolicCellHtml(v, state.symbolicMode, isExpMode, false)).join("") + `</div>`).join("") +
       `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
   }
 
@@ -2339,11 +2423,12 @@ function renderResultCard() {
           <button class="small-btn" onclick="state.resText='';state.resMatrix=null;state.resGrid=null;renderResultCard()">✕</button>
         </div>
       </div>
-      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText, state.symbolicMode) : `<pre class="res-text">${state.resText}</pre>`) : ""}
+      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText, state.symbolicMode, isExpMode) : `<pre class="res-text">${state.resText}</pre>`) : ""}
       ${matHtml}
       ${transferHtml}
     </div>`;
 }
+
 // ============================================================================
 // ОПЕРАЦИИ И МОДАЛЬНЫЕ ОКНА
 // ============================================================================
