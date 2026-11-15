@@ -375,19 +375,24 @@
       margin: 0 0 8px;
     }
     .res-grid-cell {
-      min-width: 82px;
-      min-height: 40px;
-      padding: 4px 8px;
+      width: 90px;
+      min-width: 90px;
+      max-width: 90px;
+      height: 44px;
+      padding: 4px 6px;
       border-radius: 8px;
       background: #0B1322;
       border: 1px solid #1F2E47;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: monospace;
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
       font-size: 13px;
       font-weight: 600;
       color: var(--text-white);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .frac-box {
       display: inline-flex;
@@ -1830,23 +1835,26 @@ function formatNumber(v, dec = 3) {
   return Number(v.toFixed(dec)).toString();
 }
 
-function toSymbolicToken(value) {
+function toSymbolicToken(value, isExpMode = false) {
   if (!Number.isFinite(value)) return { plainText: String(value) };
   if (Math.abs(value) < 1e-9) return { plainText: "0" };
   const near = Math.round(value);
   if (Math.abs(value - near) < 1e-6) return { plainText: String(near) };
+
   const ax = Math.abs(value), sign = value < 0 ? "−" : "";
+  // Ищем только красивые дроби со знаменателем до 36 (1/2, 3/2, 10/3, 5/3 и т.д.),
+  // чтобы иррациональные числа в LQR и cos(A) не превращались в 48214/125!
   let h1 = 1, h2 = 0, k1 = 0, k2 = 1, b = ax;
-  for (let s = 0; s < 15; s++) {
+  for (let s = 0; s < 12; s++) {
     const a = Math.floor(b);
     const h = a * h1 + h2, k = a * k1 + k2;
-    if (k > 999) break;
+    if (k > 36) break;
     h2 = h1; h1 = h; k2 = k1; k1 = k;
     const rem = b - a;
     if (rem < 1e-10) break;
     b = 1 / rem;
   }
-  if (k1 > 1 && Math.abs(ax - h1 / k1) <= 1e-4 * Math.max(1, ax)) {
+  if (k1 > 1 && Math.abs(ax - h1 / k1) <= 1e-5 * Math.max(1, ax)) {
     return { isFraction: true, sign, num: String(h1), den: String(k1) };
   }
   return { plainText: formatNumber(value) };
@@ -2100,7 +2108,7 @@ function renderGridInput() {
     for (let j = 0; j < c; j++) {
       const inp = document.createElement("input");
       inp.type = "text";
-      inp.inputMode = "decimal";
+      inp.autocomplete = "off";
       inp.className = "matrix-cell";
       inp.value = state.matrices[state.selTab][i][j];
       inp.onfocus = () => { if (inp.value === "0") inp.value = ""; };
@@ -2226,7 +2234,7 @@ function swapMatrices(i1, i2) {
   }
 }
 
-function parseRichSectionHtml(reportText) {
+function parseRichSectionHtml(reportText, symbolic = false) {
   const sections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
   const isMatLine = (s) => {
     const t = s.trim();
@@ -2234,6 +2242,7 @@ function parseRichSectionHtml(reportText) {
       (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
   };
   const renderCell = (v) => {
+    if (!symbolic) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
     const t = toSymbolicToken(v);
     if (!t.isFraction) return `<div class="res-grid-cell">${t.plainText}</div>`;
     return `<div class="res-grid-cell"><span class="frac-box">${t.sign}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span></span></div>`;
@@ -2290,6 +2299,7 @@ function renderResultCard() {
   const box = document.getElementById("resultCardContainer");
   if (!state.resText && !state.resMatrix && !state.resGrid) { box.innerHTML = ""; return; }
   const hasEmbeddedMatrices = state.resText.includes("⎡") || state.resText.includes("│") || state.resText.includes("══");
+  const showSymbolicToggle = !state.isError && (state.resMatrix !== null || hasEmbeddedMatrices);
 
   let matHtml = "";
   if (state.resGrid) {
@@ -2324,12 +2334,12 @@ function renderResultCard() {
       <div class="res-top">
         <div class="res-title">${state.isError ? "⚠️ Ошибка" : "✅ " + state.resTitle}</div>
         <div class="res-actions">
-          ${state.resMatrix && !state.isError && !hasEmbeddedMatrices ? `<button class="small-btn ${state.symbolicMode ? "active" : ""}" onclick="state.symbolicMode=!state.symbolicMode;renderResultCard()">${state.symbolicMode ? "Дроби: ВКЛ" : "a/b · eⁿ"}</button>` : ""}
+          ${showSymbolicToggle ? `<button class="small-btn ${state.symbolicMode ? "active" : ""}" onclick="state.symbolicMode=!state.symbolicMode;renderResultCard()">${state.symbolicMode ? "Дроби: ВКЛ" : "a/b · eⁿ"}</button>` : ""}
           <button class="small-btn" onclick="copyResult()">📋 Копировать</button>
           <button class="small-btn" onclick="state.resText='';state.resMatrix=null;state.resGrid=null;renderResultCard()">✕</button>
         </div>
       </div>
-      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText) : `<pre class="res-text">${state.resText}</pre>`) : ""}
+      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText, state.symbolicMode) : `<pre class="res-text">${state.resText}</pre>`) : ""}
       ${matHtml}
       ${transferHtml}
     </div>`;
@@ -2447,7 +2457,7 @@ function buildModalMatrixHtml(gridId, rows, cols, getCellFn, accentColor) {
     html += `<div class="matrix-grid-row">`;
     for (let j = 0; j < cols; j++) {
       const val = getCellFn(i, j);
-      html += `<input type="text" inputmode="decimal" class="matrix-cell" style="width:44px;height:42px;font-size:15px;"
+        html += `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="matrix-cell" style="width:44px;height:42px;font-size:15px;"
         value="${val}"
         onfocus="if(this.value==='0')this.value=''"
         onblur="if(this.value.trim()==='')this.value='0';onModalCellInput('${gridId}',${i},${j},this.value.trim())"
