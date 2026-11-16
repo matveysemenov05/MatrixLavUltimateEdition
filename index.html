@@ -1478,6 +1478,13 @@ class MatrixMath {
       const test = Array.from({ length: n }, (_, row) => [...cols.map(b => b[row]), cand[row]]);
       if (this.rank(test) > cols.length) cols.push(cand);
     }
+    if (cleanB[0].length > 1) {
+      cols.sort((a, b) => {
+        const ia = a.findIndex(v => Math.abs(v) > 1e-6);
+        const ib = b.findIndex(v => Math.abs(v) > 1e-6);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      });
+    }
     const unitOrder = cols.some(col => col[n - 1] < -1e-9)
       ? [...Array.from({ length: n - 1 }, (_, i) => i + 1), 0]
       : Array.from({ length: n }, (_, i) => n - 1 - i);
