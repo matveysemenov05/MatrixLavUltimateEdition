@@ -1688,7 +1688,7 @@ class MatrixMath {
       wcMat = this.controllability(matA, cleanB);
       const rankC = this.rank(wcMat);
       isFullCtrl = rankC === n;
-      lines.push("Матрица управляемости C(A,B) = U = [B, AB, A²B, ...]:");
+      lines.push("Матрица управляемости U = [B, AB, A²B, ...]:");
       lines.push(formatMatrixAligned(wcMat));
       if (wcMat.length === wcMat[0].length) {
         lines.push(`det(U) = ${formatNumber(this.determinant(wcMat) || 0)}`);
@@ -1699,8 +1699,7 @@ class MatrixMath {
         lines.push("➔ Вывод: система полностью управляема. Регулятор построить можно.");
       } else {
         lines.push("➔ Вывод: система не является полностью управляемой.");
-        lines.push(`• Управляемое подпространство: dim = ${rankC}\n• Неуправляемое подпространство: dim = ${n - rankC}\n`);
-        lines.push("Построим разложение Калмана на управляемое и неуправляемое подпространства:");
+        lines.push(`• Управляемое подпространство: dim = ${rankC}\n• Неуправляемое подпространство: dim = ${n - rankC}`);
         const kd = this.kalmanNotebookDecomposition(matA, cleanB);
         if (kd) {
           const [r, sMat, sInv] = kd;
@@ -1710,16 +1709,19 @@ class MatrixMath {
           const aUn = Array.from({ length: n - r }, (_, i) => Array.from({ length: n - r }, (_, j) => aTilde[r + i][r + j]));
           const unEigs = this.eigenvalues(aUn);
           isStabilizable = unEigs.every(e => e.re < -1e-7);
-          lines.push("Матрица преобразования S:\n" + formatMatrixAligned(sMat));
-          lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
-          lines.push("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:\n" + formatMatrixAligned(aTilde));
-          lines.push("Новая матрица B̃ = S⁻¹ B:\n" + formatMatrixAligned(bTilde));
-          lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
-          lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
-          lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
-          lines.push(isStabilizable
-            ? "➔ Собственные числа неуправляемой части Re(λ) < 0 (устойчива).\n➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно."
-            : "➔ Есть собственные числа неуправляемой части Re(λ) ≥ 0 (неустойчива).\n➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.");
+          if (!hasC) {
+            lines.push("\nПостроим разложение Калмана на управляемое и неуправляемое подпространства:");
+            lines.push("Матрица преобразования S:\n" + formatMatrixAligned(sMat));
+            lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
+            lines.push("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:\n" + formatMatrixAligned(aTilde));
+            lines.push("Новая матрица B̃ = S⁻¹ B:\n" + formatMatrixAligned(bTilde));
+            lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
+            lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
+            lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
+            lines.push(isStabilizable
+              ? "➔ Собственные числа неуправляемой части Re(λ) < 0 (устойчива).\n➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно."
+              : "➔ Есть собственные числа неуправляемой части Re(λ) ≥ 0 (неустойчива).\n➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.");
+          }
         }
       }
       lines.push("════════════════════════════════");
@@ -1736,7 +1738,7 @@ class MatrixMath {
         isDetectable = true;
         lines.push("➔ Вывод: система полностью наблюдаема. Наблюдатель построить можно.");
       } else {
-        lines.push(`➔ Вывод: система не является полностью наблюдаемой.\n• Наблюдаемое п/п-во: dim = ${rankO}, Ненаблюдаемое п/п-во: dim = ${n - rankO}`);
+        lines.push(`➔ Вывод: система не является полностью наблюдаемой.\n• Наблюдаемое п/п-во: dim = ${rankO}\n• Ненаблюдаемое п/п-во: dim = ${n - rankO}`);
         const aT = this.transpose(matA), cT = this.transpose(cleanC);
         const kdO = this.kalmanNotebookDecomposition(aT, cT);
         if (kdO) {
@@ -1745,17 +1747,25 @@ class MatrixMath {
           const aUnO = Array.from({ length: n - rO }, (_, i) => Array.from({ length: n - rO }, (_, j) => aTD[rO + i][rO + j]));
           const unOEigs = this.eigenvalues(aUnO);
           isDetectable = unOEigs.every(e => e.re < -1e-7);
-          lines.push(`Собственные числа ненаблюдаемой части: λ = { ${unOEigs.join(", ")} }`);
-          lines.push(isDetectable
-            ? "➔ Ненаблюдаемая часть устойчива (Re(λ) < 0) ➔ Система ДЕТЕКТИРУЕМА."
-            : "➔ Ненаблюдаемая часть неустойчива (Re(λ) ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА.");
+          if (!hasB) {
+            const tObs = this.transpose(tInvDual), tObsInv = this.transpose(tDual);
+            lines.push("\nПостроим разложение на наблюдаемое и ненаблюдаемое подпространства:");
+            lines.push("Матрица перехода T_o:\n" + formatMatrixAligned(tObs));
+            lines.push("Обратная матрица T_o⁻¹:\n" + formatMatrixAligned(tObsInv));
+            lines.push("Матрица Ã_o = T_o⁻¹ A T_o:\n" + formatMatrixAligned(this.multiply(this.multiply(tObsInv, matA), tObs)));
+            lines.push("Матрица C̃_o = C T_o:\n" + formatMatrixAligned(this.multiply(cleanC, tObs)));
+            lines.push(`Собственные числа ненаблюдаемой части: λ = { ${unOEigs.join(", ")} }`);
+            lines.push(isDetectable
+              ? "➔ Ненаблюдаемая часть устойчива (Re(λ) < 0) ➔ Система ДЕТЕКТИРУЕМА."
+              : "➔ Ненаблюдаемая часть неустойчива (Re(λ) ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА.");
+          }
         }
       }
       lines.push("════════════════════════════════");
     }
 
     if (hasB && hasC && (!isFullCtrl || !isFullObs) && wcMat && woMat) {
-      lines.push("3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T₁ T₂ T₃ T₄] (Конспект 3):");
+      lines.push("3) ПОСТРОЕНИЕ РАЗЛОЖЕНИЯ КАЛМАНА T = [T₁ T₂ T₃ T₄]:");
       const imU = this.columnSpaceBasis(wcMat), kerO = this.realNullspaceBasis(woMat);
       const t2 = this.intersectSubspaces(imU, kerO, n);
       const t1 = []; for (const v of imU) if (!this.isInSubspace([...t2, ...t1], v)) t1.push(v);
@@ -1777,13 +1787,51 @@ class MatrixMath {
         const tFull = Array.from({ length: n }, (_, r) => allCols.map(c => c[r]));
         const tInv = this.inverse(tFull);
         if (tInv) {
-          lines.push("Матрица замены T = [T₁ T₂ T₃ T₄]:\n" + formatMatrixAligned(tFull));
+          const aHat = this.multiply(this.multiply(tInv, matA), tFull);
+          lines.push("\nМатрица замены T = [T₁ T₂ T₃ T₄]:\n" + formatMatrixAligned(tFull));
           lines.push("Обратная матрица T⁻¹:\n" + formatMatrixAligned(tInv));
-          lines.push("Матрица Â = T⁻¹ A T:\n" + formatMatrixAligned(this.multiply(this.multiply(tInv, matA), tFull)));
+          lines.push("Матрица Â = T⁻¹ A T:\n" + formatMatrixAligned(aHat));
           lines.push("Матрица B̂ = T⁻¹ B:\n" + formatMatrixAligned(this.multiply(tInv, cleanB)));
           lines.push("Матрица Ĉ = C T:\n" + formatMatrixAligned(this.multiply(cleanC, tFull)));
+
+          const n1 = t1.length, n2 = t2.length, n3 = t3.length, n4 = t4.length;
+          lines.push("\nАнализ подпространств по блокам матрицы Â:");
+          let off = 0;
+          if (n1 > 0) {
+            const e1 = this.eigenvalues(Array.from({ length: n1 }, (_, i) => Array.from({ length: n1 }, (_, j) => aHat[off + i][off + j])));
+            lines.push(`• Управляемая, наблюдаемая часть (T₁, ${n1}×${n1}): λ = { ${e1.join(", ")} }`);
+            off += n1;
+          }
+          if (n2 > 0) {
+            const e2 = this.eigenvalues(Array.from({ length: n2 }, (_, i) => Array.from({ length: n2 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e2.every(e => e.re < -1e-7);
+            lines.push(`• Управляемая, ненаблюдаемая часть (T₂, ${n2}×${n2}): λ = { ${e2.join(", ")} } ➔ ${ok ? "устойчива (детектируема)" : "неустойчива (не детектируема)"}`);
+            off += n2;
+          }
+          if (n3 > 0) {
+            const e3 = this.eigenvalues(Array.from({ length: n3 }, (_, i) => Array.from({ length: n3 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e3.every(e => e.re < -1e-7);
+            lines.push(`• Неуправляемая, наблюдаемая часть (T₃, ${n3}×${n3}): λ = { ${e3.join(", ")} } ➔ ${ok ? "устойчива (стабилизируема)" : "неустойчива (не стабилизируема)"}`);
+            off += n3;
+          }
+          if (n4 > 0) {
+            const e4 = this.eigenvalues(Array.from({ length: n4 }, (_, i) => Array.from({ length: n4 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e4.every(e => e.re < -1e-7);
+            lines.push(`• Неуправляемая, ненаблюдаемая часть (T₄, ${n4}×${n4}): λ = { ${e4.join(", ")} } ➔ ${ok ? "устойчива" : "неустойчива (не стабилизируема и не детектируема)"}`);
+          }
         }
       }
+      lines.push("════════════════════════════════");
+    }
+
+    if (hasB && hasC) {
+      lines.push("ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ:");
+      lines.push(!isFullCtrl
+        ? (isStabilizable ? "✅ Неуправляемая часть устойчива ➔ Система СТАБИЛИЗИРУЕМА (регулятор построить можно)." : "❌ Неуправляемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ СТАБИЛИЗИРУЕМА (регулятор построить нельзя).")
+        : "✅ Система полностью управляема (регулятор построить можно).");
+      lines.push(!isFullObs
+        ? (isDetectable ? "✅ Ненаблюдаемая часть устойчива ➔ Система ДЕТЕКТИРУЕМА (наблюдатель построить можно)." : "❌ Ненаблюдаемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА (наблюдатель построить нельзя).")
+        : "✅ Система полностью наблюдаема (наблюдатель построить можно).");
       lines.push("════════════════════════════════");
     }
 
