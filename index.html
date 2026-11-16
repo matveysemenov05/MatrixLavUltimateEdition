@@ -1685,6 +1685,7 @@ class MatrixMath {
 
     if (hasB) {
       lines.push("1) ПРОВЕРКА УПРАВЛЯЕМОСТИ:");
+      
       wcMat = this.controllability(matA, cleanB);
       const rankC = this.rank(wcMat);
       isFullCtrl = rankC === n;
@@ -1711,9 +1712,9 @@ class MatrixMath {
           isStabilizable = unEigs.every(e => e.re < -1e-7);
           if (!hasC) {
             lines.push("\nПостроим разложение Калмана на управляемое и неуправляемое подпространства:");
-            lines.push("Матрица преобразования S:\n" + formatMatrixAligned(sMat));
+            lines.push(`Матрица преобразования S [стб: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(sMat));
             lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
-            lines.push("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:\n" + formatMatrixAligned(aTilde));
+            lines.push(`Новая матрица Ã = S⁻¹ A S [блоки: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(aTilde));
             lines.push("Новая матрица B̃ = S⁻¹ B:\n" + formatMatrixAligned(bTilde));
             lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
             lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
@@ -1788,13 +1789,13 @@ class MatrixMath {
         const tInv = this.inverse(tFull);
         if (tInv) {
           const aHat = this.multiply(this.multiply(tInv, matA), tFull);
-          lines.push("\nМатрица замены T = [T₁ T₂ T₃ T₄]:\n" + formatMatrixAligned(tFull));
+          const n1 = t1.length, n2 = t2.length, n3 = t3.length, n4 = t4.length;
+          lines.push(`\nМатрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(tFull));
           lines.push("Обратная матрица T⁻¹:\n" + formatMatrixAligned(tInv));
-          lines.push("Матрица Â = T⁻¹ A T:\n" + formatMatrixAligned(aHat));
+          lines.push(`Матрица Â = T⁻¹ A T [калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(aHat));
           lines.push("Матрица B̂ = T⁻¹ B:\n" + formatMatrixAligned(this.multiply(tInv, cleanB)));
           lines.push("Матрица Ĉ = C T:\n" + formatMatrixAligned(this.multiply(cleanC, tFull)));
 
-          const n1 = t1.length, n2 = t2.length, n3 = t3.length, n4 = t4.length;
           lines.push("\nАнализ подпространств по блокам матрицы Â:");
           let off = 0;
           if (n1 > 0) {
@@ -2409,6 +2410,51 @@ function renderSymbolicCellHtml(v, symbolic, isExpMode, fromText = false) {
   return `<div class="res-grid-cell"><span class="frac-box">${t.sign || ""}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span>${sfx}</span></div>`;
 }
 
+function getSubspaceCellStyle(r, c, meta) {
+  if (!meta) return "";
+  const styles = {
+    1: "background:rgba(112,225,161,0.18);border:1.5px solid #70E1A1;", // Изумрудный (T1 / Ac)
+    2: "background:rgba(84,229,229,0.18);border:1.5px solid #54E5E5;",  // Голубой (T2)
+    3: "background:rgba(255,209,102,0.18);border:1.5px solid #FFD166;", // Янтарный (T3)
+    4: "background:rgba(248,113,113,0.18);border:1.5px solid #F87171;", // Красный (T4 / Au)
+    5: "background:rgba(182,154,255,0.10);border:1px dashed rgba(182,154,255,0.45);" // Перекрёстный блок A12
+  };
+  if (meta.type === "ctrl_blocks") {
+    if (r < meta.r && c < meta.r) return styles[1];
+    if (r >= meta.r && c >= meta.r) return styles[4];
+    if (r < meta.r && c >= meta.r) return styles[5];
+  } else if (meta.type === "ctrl_cols") {
+    return c < meta.r ? styles[1] : styles[4];
+  } else if (meta.type === "kalman_blocks" || meta.type === "kalman_cols") {
+    const { n1, n2, n3 } = meta;
+    const colZone = c < n1 ? 1 : c < n1 + n2 ? 2 : c < n1 + n2 + n3 ? 3 : 4;
+    if (meta.type === "kalman_cols") return styles[colZone];
+    const rowZone = r < n1 ? 1 : r < n1 + n2 ? 2 : r < n1 + n2 + n3 ? 3 : 4;
+    if (rowZone === colZone) return styles[rowZone];
+  }
+  return "";
+}
+
+function buildLegendHtml(meta) {
+  if (!meta) return "";
+  const pill = (col, bg, txt) => `<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;color:${col};background:${bg};border:1px solid ${col};">${txt}</span>`;
+  if (meta.type === "ctrl_blocks" || meta.type === "ctrl_cols") {
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">` +
+      pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 Управляемая часть (${meta.r})`) +
+      pill("#F87171", "rgba(248,113,113,0.14)", `🟥 Неуправляемая часть (${meta.u})`) +
+      `</div>`;
+  }
+  if (meta.type === "kalman_blocks" || meta.type === "kalman_cols") {
+    const items = [];
+    if (meta.n1 > 0) items.push(pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 T₁ (${meta.n1}): упр., набл.`));
+    if (meta.n2 > 0) items.push(pill("#54E5E5", "rgba(84,229,229,0.14)", `🟦 T₂ (${meta.n2}): упр., ненабл.`));
+    if (meta.n3 > 0) items.push(pill("#FFD166", "rgba(255,209,102,0.14)", `🟨 T₃ (${meta.n3}): неупр., набл.`));
+    if (meta.n4 > 0) items.push(pill("#F87171", "rgba(248,113,113,0.14)", `🟥 T₄ (${meta.n4}): неупр., ненабл.`));
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">${items.join("")}</div>`;
+  }
+  return "";
+}
+
 function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
   const sections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
   const isMatLine = (s) => {
@@ -2420,7 +2466,7 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
   return sections.map(sec => {
     const lines = sec.split(/\r?\n/);
     let html = `<div style="background:#0C1424;border:1px solid #1F2E47;border-radius:13px;padding:12px;margin-bottom:10px;">`;
-    let i = 0;
+    let i = 0, lastMeta = null;
     while (i < lines.length) {
       const line = lines[i].trim();
       if (!line) { i++; continue; }
@@ -2437,25 +2483,44 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
           html += `<div class="matrix-scroll" style="margin:6px 0;"><div class="matrix-bracket-wrap">
             <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
             <div class="matrix-grid">` +
-            rows.map(r => `<div class="matrix-grid-row">` + r.map(v => renderSymbolicCellHtml(v, symbolic, isExpMode, true)).join("") + `</div>`).join("") +
-            `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
+            rows.map((r, ri) => `<div class="matrix-grid-row">` + r.map((v, ci) => {
+              const zoneStyle = getSubspaceCellStyle(ri, ci, lastMeta);
+              const cellHtml = renderSymbolicCellHtml(v, symbolic, isExpMode, true);
+              return zoneStyle ? cellHtml.replace('class="res-grid-cell"', `class="res-grid-cell" style="${zoneStyle}"`) : cellHtml;
+            }).join("") + `</div>`).join("") +
+            `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>` +
+            buildLegendHtml(lastMeta);
         }
+        lastMeta = null;
         continue;
       }
 
-      if (/^\d+\)/.test(line) || line.endsWith("ПРОСТРАНСТВЕ СОСТОЯНИЙ:") || line.startsWith("ПОСТРОЕНИЕ ") || line.startsWith("ИТОГОВЫЙ ВЫВОД")) {
-        html += `<div style="color:var(--cyan);font-weight:800;font-size:13.5px;margin:4px 0 6px;">${line}</div>`;
-      } else if (line.startsWith("➔") || line.startsWith("✅") || line.startsWith("❌") || line.startsWith("⚠️")) {
-        const bad = line.includes("НЕ ") || line.startsWith("❌");
-        const good = line.includes("СТАБИЛИЗИРУЕМА") || line.includes("ДЕТЕКТИРУЕМА") || line.includes("полностью") || line.startsWith("✅");
+      // Проверяем, есть ли в заголовке перед матрицей метаданные подсветки блоков
+      const mCtrlB = line.match(/\[блоки:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mCtrlC = line.match(/\[стб:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mKalB = line.match(/\[калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      const mKalC = line.match(/\[стб_калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      if (mCtrlB) lastMeta = { type: "ctrl_blocks", r: +mCtrlB[1], u: +mCtrlB[2] };
+      else if (mCtrlC) lastMeta = { type: "ctrl_cols", r: +mCtrlC[1], u: +mCtrlC[2] };
+      else if (mKalB) lastMeta = { type: "kalman_blocks", n1: +mKalB[1], n2: +mKalB[2], n3: +mKalB[3], n4: +mKalB[4] };
+      else if (mKalC) lastMeta = { type: "kalman_cols", n1: +mKalC[1], n2: +mKalC[2], n3: +mKalC[3], n4: +mKalC[4] };
+      else lastMeta = null;
+
+      const cleanLine = line.replace(/\s*\[(блоки|стб|калман|стб_калман):[^\]]+\]/, "");
+
+      if (/^\d+\)/.test(cleanLine) || cleanLine.endsWith("ПРОСТРАНСТВЕ СОСТОЯНИЙ:") || cleanLine.startsWith("ПОСТРОЕНИЕ ") || cleanLine.startsWith("ИТОГОВЫЙ ВЫВОД")) {
+        html += `<div style="color:var(--cyan);font-weight:800;font-size:13.5px;margin:4px 0 6px;">${cleanLine}</div>`;
+      } else if (cleanLine.startsWith("➔") || cleanLine.startsWith("✅") || cleanLine.startsWith("❌") || cleanLine.startsWith("⚠️")) {
+        const bad = cleanLine.includes("НЕ ") || cleanLine.startsWith("❌");
+        const good = cleanLine.includes("СТАБИЛИЗИРУЕМА") || cleanLine.includes("ДЕТЕКТИРУЕМА") || cleanLine.includes("полностью") || cleanLine.startsWith("✅");
         const col = bad ? "#F87171" : good ? "var(--emerald)" : "var(--amber)";
         const bg = bad ? "rgba(248,113,113,0.12)" : good ? "rgba(112,225,161,0.12)" : "rgba(255,209,102,0.12)";
-        html += `<div style="background:${bg};border:1px solid ${col};color:${col};border-radius:9px;padding:7px 10px;font-weight:700;font-size:12.5px;margin:5px 0;">${line}</div>`;
-      } else if (line.startsWith("u =") || line.startsWith("λ =")) {
-        html += `<div style="background:rgba(182,154,255,0.15);border:1px solid var(--purple);color:var(--text-white);border-radius:9px;padding:8px 12px;font-weight:800;font-family:monospace;font-size:13.5px;margin:5px 0;">${line}</div>`;
+        html += `<div style="background:${bg};border:1px solid ${col};color:${col};border-radius:9px;padding:7px 10px;font-weight:700;font-size:12.5px;margin:5px 0;">${cleanLine}</div>`;
+      } else if (cleanLine.startsWith("u =") || cleanLine.startsWith("λ =")) {
+        html += `<div style="background:rgba(182,154,255,0.15);border:1px solid var(--purple);color:var(--text-white);border-radius:9px;padding:8px 12px;font-weight:800;font-family:monospace;font-size:13.5px;margin:5px 0;">${cleanLine}</div>`;
       } else {
-        const isLbl = line.endsWith(":");
-        html += `<div style="color:${isLbl ? 'var(--amber)' : 'var(--text-white)'};font-weight:${isLbl ? '600' : '400'};font-size:12.5px;margin:3px 0;line-height:1.45;">${line}</div>`;
+        const isLbl = cleanLine.endsWith(":");
+        html += `<div style="color:${isLbl ? 'var(--amber)' : 'var(--text-white)'};font-weight:${isLbl ? '600' : '400'};font-size:12.5px;margin:3px 0;line-height:1.45;">${cleanLine}</div>`;
       }
       i++;
     }
@@ -2463,7 +2528,6 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
     return html;
   }).join("");
 }
-
 function renderResultCard() {
   const box = document.getElementById("resultCardContainer");
   if (!state.resText && !state.resMatrix && !state.resGrid) { box.innerHTML = ""; return; }
