@@ -375,19 +375,24 @@
       margin: 0 0 8px;
     }
     .res-grid-cell {
-      min-width: 82px;
-      min-height: 40px;
-      padding: 4px 8px;
+      width: 90px;
+      min-width: 90px;
+      max-width: 90px;
+      height: 44px;
+      padding: 4px 6px;
       border-radius: 8px;
       background: #0B1322;
       border: 1px solid #1F2E47;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: monospace;
+      font-family: "SFMono-Regular", Consolas, Menlo, monospace;
       font-size: 13px;
       font-weight: 600;
       color: var(--text-white);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .frac-box {
       display: inline-flex;
@@ -1473,6 +1478,13 @@ class MatrixMath {
       const test = Array.from({ length: n }, (_, row) => [...cols.map(b => b[row]), cand[row]]);
       if (this.rank(test) > cols.length) cols.push(cand);
     }
+    if (cleanB[0].length > 1) {
+      cols.sort((a, b) => {
+        const ia = a.findIndex(v => Math.abs(v) > 1e-6);
+        const ib = b.findIndex(v => Math.abs(v) > 1e-6);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      });
+    }
     const unitOrder = cols.some(col => col[n - 1] < -1e-9)
       ? [...Array.from({ length: n - 1 }, (_, i) => i + 1), 0]
       : Array.from({ length: n }, (_, i) => n - 1 - i);
@@ -1644,6 +1656,8 @@ class MatrixMath {
     });
     return terms.length ? terms.join(" ") : "0";
   }
+  
+  
   fullBlockDiagramAnalysis(matA, matB, matC) {
     const n = matA.length;
     const hasA = matA.some(r => r.some(v => Math.abs(v) > 1e-12));
@@ -1676,7 +1690,7 @@ class MatrixMath {
       wcMat = this.controllability(matA, cleanB);
       const rankC = this.rank(wcMat);
       isFullCtrl = rankC === n;
-      lines.push("Матрица управляемости C(A,B) = U = [B, AB, A²B, ...]:");
+      lines.push("Матрица управляемости U = [B, AB, A²B, ...]:");
       lines.push(formatMatrixAligned(wcMat));
       if (wcMat.length === wcMat[0].length) {
         lines.push(`det(U) = ${formatNumber(this.determinant(wcMat) || 0)}`);
@@ -1687,8 +1701,7 @@ class MatrixMath {
         lines.push("➔ Вывод: система полностью управляема. Регулятор построить можно.");
       } else {
         lines.push("➔ Вывод: система не является полностью управляемой.");
-        lines.push(`• Управляемое подпространство: dim = ${rankC}\n• Неуправляемое подпространство: dim = ${n - rankC}\n`);
-        lines.push("Построим разложение Калмана на управляемое и неуправляемое подпространства:");
+        lines.push(`• Управляемое подпространство: dim = ${rankC}\n• Неуправляемое подпространство: dim = ${n - rankC}`);
         const kd = this.kalmanNotebookDecomposition(matA, cleanB);
         if (kd) {
           const [r, sMat, sInv] = kd;
@@ -1698,16 +1711,19 @@ class MatrixMath {
           const aUn = Array.from({ length: n - r }, (_, i) => Array.from({ length: n - r }, (_, j) => aTilde[r + i][r + j]));
           const unEigs = this.eigenvalues(aUn);
           isStabilizable = unEigs.every(e => e.re < -1e-7);
-          lines.push("Матрица преобразования S:\n" + formatMatrixAligned(sMat));
-          lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
-          lines.push("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:\n" + formatMatrixAligned(aTilde));
-          lines.push("Новая матрица B̃ = S⁻¹ B:\n" + formatMatrixAligned(bTilde));
-          lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
-          lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
-          lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
-          lines.push(isStabilizable
-            ? "➔ Собственные числа неуправляемой части Re(λ) < 0 (устойчива).\n➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно."
-            : "➔ Есть собственные числа неуправляемой части Re(λ) ≥ 0 (неустойчива).\n➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.");
+          if (!hasC) {
+            lines.push("\nПостроим разложение Калмана на управляемое и неуправляемое подпространства:");
+            lines.push(`Матрица преобразования S [стб: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(sMat));
+            lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
+            lines.push(`Новая матрица Ã = S⁻¹ A S [блоки: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(aTilde));
+            lines.push(`Новая матрица B̃ = S⁻¹ B [стр: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(bTilde));
+            lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
+            lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
+            lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
+            lines.push(isStabilizable
+              ? "➔ Собственные числа неуправляемой части Re(λ) < 0 (устойчива).\n➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно."
+              : "➔ Есть собственные числа неуправляемой части Re(λ) ≥ 0 (неустойчива).\n➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.");
+          }
         }
       }
       lines.push("════════════════════════════════");
@@ -1724,7 +1740,7 @@ class MatrixMath {
         isDetectable = true;
         lines.push("➔ Вывод: система полностью наблюдаема. Наблюдатель построить можно.");
       } else {
-        lines.push(`➔ Вывод: система не является полностью наблюдаемой.\n• Наблюдаемое п/п-во: dim = ${rankO}, Ненаблюдаемое п/п-во: dim = ${n - rankO}`);
+        lines.push(`➔ Вывод: система не является полностью наблюдаемой.\n• Наблюдаемое п/п-во: dim = ${rankO}\n• Ненаблюдаемое п/п-во: dim = ${n - rankO}`);
         const aT = this.transpose(matA), cT = this.transpose(cleanC);
         const kdO = this.kalmanNotebookDecomposition(aT, cT);
         if (kdO) {
@@ -1733,17 +1749,25 @@ class MatrixMath {
           const aUnO = Array.from({ length: n - rO }, (_, i) => Array.from({ length: n - rO }, (_, j) => aTD[rO + i][rO + j]));
           const unOEigs = this.eigenvalues(aUnO);
           isDetectable = unOEigs.every(e => e.re < -1e-7);
-          lines.push(`Собственные числа ненаблюдаемой части: λ = { ${unOEigs.join(", ")} }`);
-          lines.push(isDetectable
-            ? "➔ Ненаблюдаемая часть устойчива (Re(λ) < 0) ➔ Система ДЕТЕКТИРУЕМА."
-            : "➔ Ненаблюдаемая часть неустойчива (Re(λ) ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА.");
+          if (!hasB) {
+            const tObs = this.transpose(tInvDual), tObsInv = this.transpose(tDual);
+            lines.push("\nПостроим разложение на наблюдаемое и ненаблюдаемое подпространства:");
+            lines.push("Матрица перехода T_o:\n" + formatMatrixAligned(tObs));
+            lines.push("Обратная матрица T_o⁻¹:\n" + formatMatrixAligned(tObsInv));
+            lines.push(`Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(this.multiply(this.multiply(tObsInv, matA), tObs)));
+            lines.push("Матрица C̃_o = C T_o:\n" + formatMatrixAligned(this.multiply(cleanC, tObs)));
+            lines.push(`Собственные числа ненаблюдаемой части: λ = { ${unOEigs.join(", ")} }`);
+            lines.push(isDetectable
+              ? "➔ Ненаблюдаемая часть устойчива (Re(λ) < 0) ➔ Система ДЕТЕКТИРУЕМА."
+              : "➔ Ненаблюдаемая часть неустойчива (Re(λ) ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА.");
+          }
         }
       }
       lines.push("════════════════════════════════");
     }
 
     if (hasB && hasC && (!isFullCtrl || !isFullObs) && wcMat && woMat) {
-      lines.push("3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T₁ T₂ T₃ T₄] (Конспект 3):");
+      lines.push("3) ПОСТРОЕНИЕ РАЗЛОЖЕНИЯ КАЛМАНА T = [T₁ T₂ T₃ T₄]:");
       const imU = this.columnSpaceBasis(wcMat), kerO = this.realNullspaceBasis(woMat);
       const t2 = this.intersectSubspaces(imU, kerO, n);
       const t1 = []; for (const v of imU) if (!this.isInSubspace([...t2, ...t1], v)) t1.push(v);
@@ -1765,13 +1789,51 @@ class MatrixMath {
         const tFull = Array.from({ length: n }, (_, r) => allCols.map(c => c[r]));
         const tInv = this.inverse(tFull);
         if (tInv) {
-          lines.push("Матрица замены T = [T₁ T₂ T₃ T₄]:\n" + formatMatrixAligned(tFull));
+          const aHat = this.multiply(this.multiply(tInv, matA), tFull);
+          const n1 = t1.length, n2 = t2.length, n3 = t3.length, n4 = t4.length;
+          lines.push(`\nМатрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(tFull));
           lines.push("Обратная матрица T⁻¹:\n" + formatMatrixAligned(tInv));
-          lines.push("Матрица Â = T⁻¹ A T:\n" + formatMatrixAligned(this.multiply(this.multiply(tInv, matA), tFull)));
-          lines.push("Матрица B̂ = T⁻¹ B:\n" + formatMatrixAligned(this.multiply(tInv, cleanB)));
-          lines.push("Матрица Ĉ = C T:\n" + formatMatrixAligned(this.multiply(cleanC, tFull)));
+          lines.push(`Матрица Â = T⁻¹ A T [калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(aHat));
+          lines.push(`Матрица B̂ = T⁻¹ B [стр_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(tInv, cleanB)));
+          lines.push(`Матрица Ĉ = C T [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(cleanC, tFull)));
+
+          lines.push("\nАнализ подпространств по блокам матрицы Â:");
+          let off = 0;
+          if (n1 > 0) {
+            const e1 = this.eigenvalues(Array.from({ length: n1 }, (_, i) => Array.from({ length: n1 }, (_, j) => aHat[off + i][off + j])));
+            lines.push(`• Управляемая, наблюдаемая часть (T₁, ${n1}×${n1}): λ = { ${e1.join(", ")} }`);
+            off += n1;
+          }
+          if (n2 > 0) {
+            const e2 = this.eigenvalues(Array.from({ length: n2 }, (_, i) => Array.from({ length: n2 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e2.every(e => e.re < -1e-7);
+            lines.push(`• Управляемая, ненаблюдаемая часть (T₂, ${n2}×${n2}): λ = { ${e2.join(", ")} } ➔ ${ok ? "устойчива (детектируема)" : "неустойчива (не детектируема)"}`);
+            off += n2;
+          }
+          if (n3 > 0) {
+            const e3 = this.eigenvalues(Array.from({ length: n3 }, (_, i) => Array.from({ length: n3 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e3.every(e => e.re < -1e-7);
+            lines.push(`• Неуправляемая, наблюдаемая часть (T₃, ${n3}×${n3}): λ = { ${e3.join(", ")} } ➔ ${ok ? "устойчива (стабилизируема)" : "неустойчива (не стабилизируема)"}`);
+            off += n3;
+          }
+          if (n4 > 0) {
+            const e4 = this.eigenvalues(Array.from({ length: n4 }, (_, i) => Array.from({ length: n4 }, (_, j) => aHat[off + i][off + j])));
+            const ok = e4.every(e => e.re < -1e-7);
+            lines.push(`• Неуправляемая, ненаблюдаемая часть (T₄, ${n4}×${n4}): λ = { ${e4.join(", ")} } ➔ ${ok ? "устойчива" : "неустойчива (не стабилизируема и не детектируема)"}`);
+          }
         }
       }
+      lines.push("════════════════════════════════");
+    }
+
+    if (hasB && hasC) {
+      lines.push("ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ:");
+      lines.push(!isFullCtrl
+        ? (isStabilizable ? "✅ Неуправляемая часть устойчива ➔ Система СТАБИЛИЗИРУЕМА (регулятор построить можно)." : "❌ Неуправляемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ СТАБИЛИЗИРУЕМА (регулятор построить нельзя).")
+        : "✅ Система полностью управляема (регулятор построить можно).");
+      lines.push(!isFullObs
+        ? (isDetectable ? "✅ Ненаблюдаемая часть устойчива ➔ Система ДЕТЕКТИРУЕМА (наблюдатель построить можно)." : "❌ Ненаблюдаемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА (наблюдатель построить нельзя).")
+        : "✅ Система полностью наблюдаема (наблюдатель построить можно).");
       lines.push("════════════════════════════════");
     }
 
@@ -1801,6 +1863,7 @@ class MatrixMath {
     }
     return lines.join("\n");
   }
+
 }
 
 // ============================================================================
@@ -1830,27 +1893,140 @@ function formatNumber(v, dec = 3) {
   return Number(v.toFixed(dec)).toString();
 }
 
-function toSymbolicToken(value) {
+function toSuperscriptStr(str) {
+  const map = { '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','−':'⁻' };
+  return String(str).split('').map(c => map[c] || c).join('');
+}
+
+function gcdNum(a0, b0) {
+  let a = Math.abs(Math.round(a0)), b = Math.abs(Math.round(b0));
+  while (b !== 0) { const t = a % b; a = b; b = t; }
+  return a === 0 ? 1 : a;
+}
+
+
+function toSymbolicToken(value, isExpMode = false) {
   if (!Number.isFinite(value)) return { plainText: String(value) };
   if (Math.abs(value) < 1e-9) return { plainText: "0" };
-  const near = Math.round(value);
-  if (Math.abs(value - near) < 1e-6) return { plainText: String(near) };
-  const ax = Math.abs(value), sign = value < 0 ? "−" : "";
-  let h1 = 1, h2 = 0, k1 = 0, k2 = 1, b = ax;
-  for (let s = 0; s < 15; s++) {
-    const a = Math.floor(b);
-    const h = a * h1 + h2, k = a * k1 + k2;
-    if (k > 999) break;
-    h2 = h1; h1 = h; k2 = k1; k1 = k;
-    const rem = b - a;
-    if (rem < 1e-10) break;
-    b = 1 / rem;
+
+  const nearestInt = Math.round(value);
+  if (Math.abs(value - nearestInt) < 1e-6 && Math.abs(nearestInt) < 1e9) {
+    return { plainText: String(nearestInt) };
   }
-  if (k1 > 1 && Math.abs(ax - h1 / k1) <= 1e-4 * Math.max(1, ax)) {
-    return { isFraction: true, sign, num: String(h1), den: String(k1) };
+
+  function findFraction(x, maxQ, tol) {
+    const ax = Math.abs(x);
+    if (ax < 1e-7 || ax > 1e7) return null;
+    let h1 = 1, h2 = 0, k1 = 0, k2 = 1, b = ax;
+    for (let step = 0; step < 18; step++) {
+      const a = Math.floor(b);
+      const h = a * h1 + h2;
+      const k = a * k1 + k2;
+      if (k > maxQ) break;
+      h2 = h1; h1 = h; k2 = k1; k1 = k;
+      const rem = b - a;
+      if (rem < 1e-11) break;
+      b = 1.0 / rem;
+    }
+    if (k1 <= 1 || h1 === 0) return null;
+    const relErr = Math.abs(ax - h1 / k1) / Math.max(1.0, ax);
+    return relErr <= tol ? [h1, k1] : null;
   }
+
+  const signStr = value < 0 ? "−" : "";
+  const absVal = Math.abs(value);
+
+  // 1. Сначала короткие точные дроби до 16
+  const f16 = findFraction(absVal, 16, 1e-6);
+  if (f16) return { isFraction: true, sign: signStr, num: String(f16[0]), den: String(f16[1]), suffix: "" };
+
+  // 2. Полный режим экспоненты e^A (одиночные e^k и комбинации a*e^k1 + b*e^k2)
+  if (isExpMode) {
+    const powers = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,-1,-2,-3,-4,-5,-6,-7,-8];
+    for (const k of powers) {
+      const ePow = Math.exp(k);
+      const eStr = k === 1 ? "e" : "e" + toSuperscriptStr(k);
+      for (let q = 1; q <= 16; q++) {
+        const scaled = value * q;
+        for (let a = -16; a <= 16; a++) {
+          if (a === 0) continue;
+          const b = Math.round(scaled - a * ePow);
+          if (Math.abs(b) > 16) continue;
+          const approx = (a * ePow + b) / q;
+          if (Math.abs(value - approx) / Math.max(1.0, Math.abs(value)) <= 1e-4) {
+            const g = gcdNum(gcdNum(a, b), q);
+            const a1 = a / g, b1 = b / g, q1 = q / g;
+            const aTerm = a1 === 1 ? eStr : a1 === -1 ? "−" + eStr : a1 + eStr;
+            const expr = b1 === 0 ? aTerm : b1 > 0 ? `${aTerm}+${b1}` : `${aTerm}−${Math.abs(b1)}`;
+            if (q1 === 1) return { plainText: expr };
+            if (b1 === 0) return { isFraction: true, sign: a1 < 0 ? "−" : "", num: String(Math.abs(a1)), den: String(q1), suffix: eStr };
+            return { isFraction: true, sign: "", num: expr, den: String(q1), suffix: "" };
+          }
+        }
+      }
+    }
+
+    const smallPowers = [1, 2, 3, 4, 5, 6, 7, 8, -1, -2, -3];
+    for (let i = 0; i < smallPowers.length; i++) {
+      for (let j = i + 1; j < smallPowers.length; j++) {
+        const k1 = smallPowers[i], k2 = smallPowers[j];
+        const e1 = Math.exp(k1), e2 = Math.exp(k2);
+        const s1 = k1 === 1 ? "e" : "e" + toSuperscriptStr(k1);
+        const s2 = k2 === 1 ? "e" : "e" + toSuperscriptStr(k2);
+        for (let q = 1; q <= 6; q++) {
+          const scaled = value * q;
+          for (let a = -6; a <= 6; a++) {
+            if (a === 0) continue;
+            const b = Math.round((scaled - a * e1) / e2);
+            if (b === 0 || Math.abs(b) > 6) continue;
+            const approx = (a * e1 + b * e2) / q;
+            if (Math.abs(value - approx) / Math.max(1.0, Math.abs(value)) <= 1e-4) {
+              const g = gcdNum(gcdNum(a, b), q);
+              const a1 = a / g, b1 = b / g, q1 = q / g;
+              const t1 = a1 === 1 ? s1 : a1 === -1 ? "−" + s1 : a1 + s1;
+              const t2 = b1 === 1 ? "+" + s2 : b1 === -1 ? "−" + s2 : b1 > 0 ? `+${b1}${s2}` : `−${Math.abs(b1)}${s2}`;
+              const expr = `${t1}${t2}`;
+              return q1 === 1 ? { plainText: expr } : { isFraction: true, sign: "", num: expr, den: String(q1), suffix: "" };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Корни √2, √3, √5, √6, √7
+  for (const rad of [2, 3, 5, 6, 7]) {
+    const rVal = Math.sqrt(rad);
+    const rStr = "√" + rad;
+    for (let q = 1; q <= 12; q++) {
+      const scaled = value * q;
+      for (let a = -12; a <= 12; a++) {
+        if (a === 0) continue;
+        const b = Math.round(scaled - a * rVal);
+        if (Math.abs(b) > 12) continue;
+        const approx = (a * rVal + b) / q;
+        if (Math.abs(value - approx) / Math.max(1.0, Math.abs(value)) <= 1e-6) {
+          const g = gcdNum(gcdNum(a, b), q);
+          const a1 = a / g, b1 = b / g, q1 = q / g;
+          const aTerm = a1 === 1 ? rStr : a1 === -1 ? "−" + rStr : a1 + rStr;
+          const expr = b1 === 0 ? aTerm : `${b1}+${aTerm}`.replace("+-", "−").replace("+−", "−");
+          if (q1 === 1) return { plainText: expr };
+          if (b1 === 0) return { isFraction: true, sign: a1 < 0 ? "−" : "", num: String(Math.abs(a1)), den: String(q1), suffix: rStr };
+          return { isFraction: true, sign: "", num: expr, den: String(q1), suffix: "" };
+        }
+      }
+    }
+  }
+
+  // 4. Аккуратные дроби со знаменателем до 64 (и числителем <= 999)
+  const f64 = findFraction(absVal, 64, 5e-4);
+  if (f64 && f64[0] <= 999) {
+    return { isFraction: true, sign: signStr, num: String(f64[0]), den: String(f64[1]), suffix: "" };
+  }
+
   return { plainText: formatNumber(value) };
 }
+
 
 function formatSymbolic(v) {
   const t = toSymbolicToken(v);
@@ -1900,8 +2076,8 @@ function characteristicPolynomialString(mat) {
 // СОСТОЯНИЕ ИНТЕРФЕЙСА И РЕНДЕРИНГ
 // ============================================================================
 const state = {
-  mainTab: 0, // 0 = Алгебра, 1 = ТАУ
-  selTab: 0,  // 0 = A, 1 = B, 2 = C
+  mainTab: 0,
+  selTab: 0,
   algDim: [{ r: 3, c: 3 }, { r: 3, c: 3 }, { r: 3, c: 3 }],
   tauN: 3, tauM: 1, tauK: 1,
   matrices: [
@@ -1931,6 +2107,7 @@ function getDims(idx = state.selTab) {
   if (idx === 1) return { r: state.tauN, c: state.tauM };
   return { r: state.tauK, c: state.tauN };
 }
+
 function getParsedMatrix(idx = state.selTab) {
   const { r, c } = getDims(idx);
   return Array.from({ length: r }, (_, i) =>
@@ -2003,9 +2180,6 @@ function transferToTarget(targetIdx, mat) {
   showToast(`Перенесено в ${["A", "B", "C"][targetIdx]} (${r}×${c})`);
 }
 
-// ============================================================================
-// ОТРИСОВКА ИНТЕРФЕЙСА
-// ============================================================================
 function renderAll() {
   document.getElementById("historyCount").textContent = state.history.length;
   document.getElementById("tabMain0").className = "cat-pill" + (state.mainTab === 0 ? " active-cyan" : "");
@@ -2100,7 +2274,7 @@ function renderGridInput() {
     for (let j = 0; j < c; j++) {
       const inp = document.createElement("input");
       inp.type = "text";
-      inp.inputMode = "decimal";
+      inp.autocomplete = "off";
       inp.className = "matrix-cell";
       inp.value = state.matrices[state.selTab][i][j];
       inp.onfocus = () => { if (inp.value === "0") inp.value = ""; };
@@ -2136,7 +2310,7 @@ function swapMatrices(i1, i2) {
   showToast("Матрицы обменяны!");
 }
 
- function renderOperationsPanel() {
+function renderOperationsPanel() {
   const panel = document.getElementById("operationsPanel");
   const name = ["A", "B", "C"][state.selTab];
   const { r, c } = getDims();
@@ -2226,23 +2400,78 @@ function swapMatrices(i1, i2) {
   }
 }
 
-function parseRichSectionHtml(reportText) {
+function renderSymbolicCellHtml(v, symbolic, isExpMode, fromText = false) {
+  if (!symbolic) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
+  const isSqrtMode = state.resTitle.includes("Корень") || state.resTitle.includes("√");
+  const t = toSymbolicToken(v, isExpMode, isSqrtMode, fromText);
+  if (!t.isFraction) {
+    const isSpec = t.plainText.includes("e") || t.plainText.includes("√");
+    return `<div class="res-grid-cell" style="${isSpec ? 'color:var(--cyan);font-weight:800;' : ''}">${t.plainText}</div>`;
+  }
+  const sfx = t.suffix ? `<span style="color:var(--amber);font-weight:800;margin-left:2px;">${t.suffix}</span>` : "";
+  return `<div class="res-grid-cell"><span class="frac-box">${t.sign || ""}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span>${sfx}</span></div>`;
+}
+
+function getSubspaceCellStyle(r, c, meta) {
+  if (!meta) return "";
+  const styles = {
+    1: "background:rgba(112,225,161,0.18);border:1.5px solid #70E1A1;",
+    2: "background:rgba(84,229,229,0.18);border:1.5px solid #54E5E5;",
+    3: "background:rgba(255,209,102,0.18);border:1.5px solid #FFD166;",
+    4: "background:rgba(248,113,113,0.18);border:1.5px solid #F87171;",
+    5: "background:rgba(182,154,255,0.10);border:1px dashed rgba(182,154,255,0.45);"
+  };
+  if (meta.type === "ctrl_blocks") {
+    if (r < meta.r && c < meta.r) return styles[1];
+    if (r >= meta.r && c >= meta.r) return styles[4];
+    if (r < meta.r && c >= meta.r) return styles[5];
+  } else if (meta.type === "ctrl_cols") {
+    return c < meta.r ? styles[1] : styles[4];
+  } else if (meta.type === "ctrl_rows") {
+    return r < meta.r ? styles[1] : styles[4];
+  } else if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
+    const { n1, n2, n3 } = meta;
+    const colZone = c < n1 ? 1 : c < n1 + n2 ? 2 : c < n1 + n2 + n3 ? 3 : 4;
+    const rowZone = r < n1 ? 1 : r < n1 + n2 ? 2 : r < n1 + n2 + n3 ? 3 : 4;
+    if (meta.type === "kalman_cols") return styles[colZone];
+    if (meta.type === "kalman_rows") return styles[rowZone];
+    if (rowZone === colZone) return styles[rowZone];
+  }
+  return "";
+}
+
+function buildLegendHtml(meta) {
+  if (!meta) return "";
+  const pill = (col, bg, txt) => `<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;color:${col};background:${bg};border:1px solid ${col};">${txt}</span>`;
+  if (meta.type === "ctrl_blocks" || meta.type === "ctrl_cols" || meta.type === "ctrl_rows") {
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">` +
+      pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 Управляемая часть (${meta.r})`) +
+      pill("#F87171", "rgba(248,113,113,0.14)", `🟥 Неуправляемая часть (${meta.u})`) +
+      `</div>`;
+  }
+  if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
+    const items = [];
+    if (meta.n1 > 0) items.push(pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 T₁ (${meta.n1}): упр., набл.`));
+    if (meta.n2 > 0) items.push(pill("#54E5E5", "rgba(84,229,229,0.14)", `🟦 T₂ (${meta.n2}): упр., ненабл.`));
+    if (meta.n3 > 0) items.push(pill("#FFD166", "rgba(255,209,102,0.14)", `🟨 T₃ (${meta.n3}): неупр., набл.`));
+    if (meta.n4 > 0) items.push(pill("#F87171", "rgba(248,113,113,0.14)", `🟥 T₄ (${meta.n4}): неупр., ненабл.`));
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">${items.join("")}</div>`;
+  }
+  return "";
+}
+
+function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
   const sections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
   const isMatLine = (s) => {
     const t = s.trim();
     return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
       (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
   };
-  const renderCell = (v) => {
-    const t = toSymbolicToken(v);
-    if (!t.isFraction) return `<div class="res-grid-cell">${t.plainText}</div>`;
-    return `<div class="res-grid-cell"><span class="frac-box">${t.sign}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span></span></div>`;
-  };
 
   return sections.map(sec => {
     const lines = sec.split(/\r?\n/);
     let html = `<div style="background:#0C1424;border:1px solid #1F2E47;border-radius:13px;padding:12px;margin-bottom:10px;">`;
-    let i = 0;
+    let i = 0, lastMeta = null;
     while (i < lines.length) {
       const line = lines[i].trim();
       if (!line) { i++; continue; }
@@ -2259,25 +2488,47 @@ function parseRichSectionHtml(reportText) {
           html += `<div class="matrix-scroll" style="margin:6px 0;"><div class="matrix-bracket-wrap">
             <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
             <div class="matrix-grid">` +
-            rows.map(r => `<div class="matrix-grid-row">` + r.map(renderCell).join("") + `</div>`).join("") +
-            `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
+            rows.map((r, ri) => `<div class="matrix-grid-row">` + r.map((v, ci) => {
+              const zoneStyle = getSubspaceCellStyle(ri, ci, lastMeta);
+              const cellHtml = renderSymbolicCellHtml(v, symbolic, isExpMode, true);
+              return zoneStyle ? cellHtml.replace('class="res-grid-cell"', `class="res-grid-cell" style="${zoneStyle}"`) : cellHtml;
+            }).join("") + `</div>`).join("") +
+            `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>` +
+            buildLegendHtml(lastMeta);
         }
+        lastMeta = null;
         continue;
       }
 
-      if (/^\d+\)/.test(line) || line.endsWith("ПРОСТРАНСТВЕ СОСТОЯНИЙ:") || line.startsWith("ПОСТРОЕНИЕ ") || line.startsWith("ИТОГОВЫЙ ВЫВОД")) {
-        html += `<div style="color:var(--cyan);font-weight:800;font-size:13.5px;margin:4px 0 6px;">${line}</div>`;
-      } else if (line.startsWith("➔") || line.startsWith("✅") || line.startsWith("❌") || line.startsWith("⚠️")) {
-        const bad = line.includes("НЕ ") || line.startsWith("❌");
-        const good = line.includes("СТАБИЛИЗИРУЕМА") || line.includes("ДЕТЕКТИРУЕМА") || line.includes("полностью") || line.startsWith("✅");
+      const mCtrlB = line.match(/\[блоки:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mCtrlC = line.match(/\[стб:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mCtrlR = line.match(/\[стр:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mKalB = line.match(/\[калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      const mKalC = line.match(/\[стб_калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      const mKalR = line.match(/\[стр_калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      if (mCtrlB) lastMeta = { type: "ctrl_blocks", r: +mCtrlB[1], u: +mCtrlB[2] };
+      else if (mCtrlC) lastMeta = { type: "ctrl_cols", r: +mCtrlC[1], u: +mCtrlC[2] };
+      else if (mCtrlR) lastMeta = { type: "ctrl_rows", r: +mCtrlR[1], u: +mCtrlR[2] };
+      else if (mKalB) lastMeta = { type: "kalman_blocks", n1: +mKalB[1], n2: +mKalB[2], n3: +mKalB[3], n4: +mKalB[4] };
+      else if (mKalC) lastMeta = { type: "kalman_cols", n1: +mKalC[1], n2: +mKalC[2], n3: +mKalC[3], n4: +mKalC[4] };
+      else if (mKalR) lastMeta = { type: "kalman_rows", n1: +mKalR[1], n2: +mKalR[2], n3: +mKalR[3], n4: +mKalR[4] };
+      else lastMeta = null;
+
+      const cleanLine = line.replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/, "");
+
+      if (/^\d+\)/.test(cleanLine) || cleanLine.endsWith("ПРОСТРАНСТВЕ СОСТОЯНИЙ:") || cleanLine.startsWith("ПОСТРОЕНИЕ ") || cleanLine.startsWith("ИТОГОВЫЙ ВЫВОД")) {
+        html += `<div style="color:var(--cyan);font-weight:800;font-size:13.5px;margin:4px 0 6px;">${cleanLine}</div>`;
+      } else if (cleanLine.startsWith("➔") || cleanLine.startsWith("✅") || cleanLine.startsWith("❌") || cleanLine.startsWith("⚠️")) {
+        const bad = cleanLine.includes("НЕ ") || cleanLine.startsWith("❌");
+        const good = cleanLine.includes("СТАБИЛИЗИРУЕМА") || cleanLine.includes("ДЕТЕКТИРУЕМА") || cleanLine.includes("полностью") || cleanLine.startsWith("✅");
         const col = bad ? "#F87171" : good ? "var(--emerald)" : "var(--amber)";
         const bg = bad ? "rgba(248,113,113,0.12)" : good ? "rgba(112,225,161,0.12)" : "rgba(255,209,102,0.12)";
-        html += `<div style="background:${bg};border:1px solid ${col};color:${col};border-radius:9px;padding:7px 10px;font-weight:700;font-size:12.5px;margin:5px 0;">${line}</div>`;
-      } else if (line.startsWith("u =") || line.startsWith("λ =")) {
-        html += `<div style="background:rgba(182,154,255,0.15);border:1px solid var(--purple);color:var(--text-white);border-radius:9px;padding:8px 12px;font-weight:800;font-family:monospace;font-size:13.5px;margin:5px 0;">${line}</div>`;
+        html += `<div style="background:${bg};border:1px solid ${col};color:${col};border-radius:9px;padding:7px 10px;font-weight:700;font-size:12.5px;margin:5px 0;">${cleanLine}</div>`;
+      } else if (cleanLine.startsWith("u =") || cleanLine.startsWith("λ =")) {
+        html += `<div style="background:rgba(182,154,255,0.15);border:1px solid var(--purple);color:var(--text-white);border-radius:9px;padding:8px 12px;font-weight:800;font-family:monospace;font-size:13.5px;margin:5px 0;">${cleanLine}</div>`;
       } else {
-        const isLbl = line.endsWith(":");
-        html += `<div style="color:${isLbl ? 'var(--amber)' : 'var(--text-white)'};font-weight:${isLbl ? '600' : '400'};font-size:12.5px;margin:3px 0;line-height:1.45;">${line}</div>`;
+        const isLbl = cleanLine.endsWith(":");
+        html += `<div style="color:${isLbl ? 'var(--amber)' : 'var(--text-white)'};font-weight:${isLbl ? '600' : '400'};font-size:12.5px;margin:3px 0;line-height:1.45;">${cleanLine}</div>`;
       }
       i++;
     }
@@ -2290,22 +2541,27 @@ function renderResultCard() {
   const box = document.getElementById("resultCardContainer");
   if (!state.resText && !state.resMatrix && !state.resGrid) { box.innerHTML = ""; return; }
   const hasEmbeddedMatrices = state.resText.includes("⎡") || state.resText.includes("│") || state.resText.includes("══");
+  const showSymbolicToggle = !state.isError && (state.resMatrix !== null || hasEmbeddedMatrices);
+  const isExpMode = state.resTitle.includes("Экспонента") || state.resTitle.includes("e^");
 
   let matHtml = "";
   if (state.resGrid) {
-    matHtml = `<div class="matrix-scroll"><div class="matrix-grid">` +
-      state.resGrid.map(row => `<div class="matrix-grid-row">` + row.map(cell => `<div class="res-grid-cell">${cell}</div>`).join("") + `</div>`).join("") +
-      `</div></div>`;
+    const hasComplex = state.resGrid.some(r => r.some(c => String(c).includes("i") || String(c).length > 7));
+    const wStyle = hasComplex ? "width:136px;min-width:136px;max-width:136px;font-size:12px;" : "";
+    matHtml = `<div class="matrix-scroll"><div class="matrix-bracket-wrap">
+      <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
+      <div class="matrix-grid">` +
+      state.resGrid.map((row, i) => `<div class="matrix-grid-row">` + row.map((cell, j) => {
+        const isJordanOne = cell === "1" && i !== j;
+        const cStyle = isJordanOne ? "color:var(--cyan);font-weight:800;" : (i === j ? "font-weight:800;" : "");
+        return `<div class="res-grid-cell" style="${wStyle}${cStyle}">${cell}</div>`;
+      }).join("") + `</div>`).join("") +
+      `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
   } else if (state.resMatrix && !hasEmbeddedMatrices) {
     matHtml = `<div class="matrix-scroll"><div class="matrix-bracket-wrap">
       <div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div>
       <div class="matrix-grid">` +
-      state.resMatrix.map(row => `<div class="matrix-grid-row">` + row.map(v => {
-        if (!state.symbolicMode) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
-        const t = toSymbolicToken(v);
-        if (!t.isFraction) return `<div class="res-grid-cell">${t.plainText}</div>`;
-        return `<div class="res-grid-cell"><span class="frac-box">${t.sign}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span></span></div>`;
-      }).join("") + `</div>`).join("") +
+      state.resMatrix.map(row => `<div class="matrix-grid-row">` + row.map(v => renderSymbolicCellHtml(v, state.symbolicMode, isExpMode, false)).join("") + `</div>`).join("") +
       `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>`;
   }
 
@@ -2324,16 +2580,17 @@ function renderResultCard() {
       <div class="res-top">
         <div class="res-title">${state.isError ? "⚠️ Ошибка" : "✅ " + state.resTitle}</div>
         <div class="res-actions">
-          ${state.resMatrix && !state.isError && !hasEmbeddedMatrices ? `<button class="small-btn ${state.symbolicMode ? "active" : ""}" onclick="state.symbolicMode=!state.symbolicMode;renderResultCard()">${state.symbolicMode ? "Дроби: ВКЛ" : "a/b · eⁿ"}</button>` : ""}
+          ${showSymbolicToggle ? `<button class="small-btn ${state.symbolicMode ? "active" : ""}" onclick="state.symbolicMode=!state.symbolicMode;renderResultCard()">${state.symbolicMode ? "Дроби: ВКЛ" : "a/b · eⁿ"}</button>` : ""}
           <button class="small-btn" onclick="copyResult()">📋 Копировать</button>
           <button class="small-btn" onclick="state.resText='';state.resMatrix=null;state.resGrid=null;renderResultCard()">✕</button>
         </div>
       </div>
-      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText) : `<pre class="res-text">${state.resText}</pre>`) : ""}
+      ${state.resText ? (hasEmbeddedMatrices ? parseRichSectionHtml(state.resText, state.symbolicMode, isExpMode) : `<pre class="res-text">${state.resText}</pre>`) : ""}
       ${matHtml}
       ${transferHtml}
     </div>`;
 }
+
 // ============================================================================
 // ОПЕРАЦИИ И МОДАЛЬНЫЕ ОКНА
 // ============================================================================
@@ -2447,7 +2704,7 @@ function buildModalMatrixHtml(gridId, rows, cols, getCellFn, accentColor) {
     html += `<div class="matrix-grid-row">`;
     for (let j = 0; j < cols; j++) {
       const val = getCellFn(i, j);
-      html += `<input type="text" inputmode="decimal" class="matrix-cell" style="width:44px;height:42px;font-size:15px;"
+        html += `<input type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" class="matrix-cell" style="width:44px;height:42px;font-size:15px;"
         value="${val}"
         onfocus="if(this.value==='0')this.value=''"
         onblur="if(this.value.trim()==='')this.value='0';onModalCellInput('${gridId}',${i},${j},this.value.trim())"
