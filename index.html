@@ -1656,6 +1656,8 @@ class MatrixMath {
     });
     return terms.length ? terms.join(" ") : "0";
   }
+  
+  
   fullBlockDiagramAnalysis(matA, matB, matC) {
     const n = matA.length;
     const hasA = matA.some(r => r.some(v => Math.abs(v) > 1e-12));
@@ -1685,7 +1687,6 @@ class MatrixMath {
 
     if (hasB) {
       lines.push("1) ПРОВЕРКА УПРАВЛЯЕМОСТИ:");
-      
       wcMat = this.controllability(matA, cleanB);
       const rankC = this.rank(wcMat);
       isFullCtrl = rankC === n;
@@ -1715,7 +1716,7 @@ class MatrixMath {
             lines.push(`Матрица преобразования S [стб: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(sMat));
             lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
             lines.push(`Новая матрица Ã = S⁻¹ A S [блоки: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(aTilde));
-            lines.push("Новая матрица B̃ = S⁻¹ B:\n" + formatMatrixAligned(bTilde));
+            lines.push(`Новая матрица B̃ = S⁻¹ B [стр: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(bTilde));
             lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
             lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
             lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
@@ -1753,7 +1754,7 @@ class MatrixMath {
             lines.push("\nПостроим разложение на наблюдаемое и ненаблюдаемое подпространства:");
             lines.push("Матрица перехода T_o:\n" + formatMatrixAligned(tObs));
             lines.push("Обратная матрица T_o⁻¹:\n" + formatMatrixAligned(tObsInv));
-            lines.push("Матрица Ã_o = T_o⁻¹ A T_o:\n" + formatMatrixAligned(this.multiply(this.multiply(tObsInv, matA), tObs)));
+            lines.push(`Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(this.multiply(this.multiply(tObsInv, matA), tObs)));
             lines.push("Матрица C̃_o = C T_o:\n" + formatMatrixAligned(this.multiply(cleanC, tObs)));
             lines.push(`Собственные числа ненаблюдаемой части: λ = { ${unOEigs.join(", ")} }`);
             lines.push(isDetectable
@@ -1793,8 +1794,8 @@ class MatrixMath {
           lines.push(`\nМатрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(tFull));
           lines.push("Обратная матрица T⁻¹:\n" + formatMatrixAligned(tInv));
           lines.push(`Матрица Â = T⁻¹ A T [калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(aHat));
-          lines.push("Матрица B̂ = T⁻¹ B:\n" + formatMatrixAligned(this.multiply(tInv, cleanB)));
-          lines.push("Матрица Ĉ = C T:\n" + formatMatrixAligned(this.multiply(cleanC, tFull)));
+          lines.push(`Матрица B̂ = T⁻¹ B [стр_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(tInv, cleanB)));
+          lines.push(`Матрица Ĉ = C T [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(cleanC, tFull)));
 
           lines.push("\nАнализ подпространств по блокам матрицы Â:");
           let off = 0;
@@ -1862,6 +1863,7 @@ class MatrixMath {
     }
     return lines.join("\n");
   }
+
 }
 
 // ============================================================================
@@ -2413,11 +2415,11 @@ function renderSymbolicCellHtml(v, symbolic, isExpMode, fromText = false) {
 function getSubspaceCellStyle(r, c, meta) {
   if (!meta) return "";
   const styles = {
-    1: "background:rgba(112,225,161,0.18);border:1.5px solid #70E1A1;", // Изумрудный (T1 / Ac)
-    2: "background:rgba(84,229,229,0.18);border:1.5px solid #54E5E5;",  // Голубой (T2)
-    3: "background:rgba(255,209,102,0.18);border:1.5px solid #FFD166;", // Янтарный (T3)
-    4: "background:rgba(248,113,113,0.18);border:1.5px solid #F87171;", // Красный (T4 / Au)
-    5: "background:rgba(182,154,255,0.10);border:1px dashed rgba(182,154,255,0.45);" // Перекрёстный блок A12
+    1: "background:rgba(112,225,161,0.18);border:1.5px solid #70E1A1;",
+    2: "background:rgba(84,229,229,0.18);border:1.5px solid #54E5E5;",
+    3: "background:rgba(255,209,102,0.18);border:1.5px solid #FFD166;",
+    4: "background:rgba(248,113,113,0.18);border:1.5px solid #F87171;",
+    5: "background:rgba(182,154,255,0.10);border:1px dashed rgba(182,154,255,0.45);"
   };
   if (meta.type === "ctrl_blocks") {
     if (r < meta.r && c < meta.r) return styles[1];
@@ -2425,11 +2427,14 @@ function getSubspaceCellStyle(r, c, meta) {
     if (r < meta.r && c >= meta.r) return styles[5];
   } else if (meta.type === "ctrl_cols") {
     return c < meta.r ? styles[1] : styles[4];
-  } else if (meta.type === "kalman_blocks" || meta.type === "kalman_cols") {
+  } else if (meta.type === "ctrl_rows") {
+    return r < meta.r ? styles[1] : styles[4];
+  } else if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
     const { n1, n2, n3 } = meta;
     const colZone = c < n1 ? 1 : c < n1 + n2 ? 2 : c < n1 + n2 + n3 ? 3 : 4;
-    if (meta.type === "kalman_cols") return styles[colZone];
     const rowZone = r < n1 ? 1 : r < n1 + n2 ? 2 : r < n1 + n2 + n3 ? 3 : 4;
+    if (meta.type === "kalman_cols") return styles[colZone];
+    if (meta.type === "kalman_rows") return styles[rowZone];
     if (rowZone === colZone) return styles[rowZone];
   }
   return "";
@@ -2438,13 +2443,13 @@ function getSubspaceCellStyle(r, c, meta) {
 function buildLegendHtml(meta) {
   if (!meta) return "";
   const pill = (col, bg, txt) => `<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;color:${col};background:${bg};border:1px solid ${col};">${txt}</span>`;
-  if (meta.type === "ctrl_blocks" || meta.type === "ctrl_cols") {
+  if (meta.type === "ctrl_blocks" || meta.type === "ctrl_cols" || meta.type === "ctrl_rows") {
     return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">` +
       pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 Управляемая часть (${meta.r})`) +
       pill("#F87171", "rgba(248,113,113,0.14)", `🟥 Неуправляемая часть (${meta.u})`) +
       `</div>`;
   }
-  if (meta.type === "kalman_blocks" || meta.type === "kalman_cols") {
+  if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
     const items = [];
     if (meta.n1 > 0) items.push(pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 T₁ (${meta.n1}): упр., набл.`));
     if (meta.n2 > 0) items.push(pill("#54E5E5", "rgba(84,229,229,0.14)", `🟦 T₂ (${meta.n2}): упр., ненабл.`));
@@ -2495,18 +2500,21 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
         continue;
       }
 
-      // Проверяем, есть ли в заголовке перед матрицей метаданные подсветки блоков
       const mCtrlB = line.match(/\[блоки:\s*упр=(\d+),\s*неупр=(\d+)\]/);
       const mCtrlC = line.match(/\[стб:\s*упр=(\d+),\s*неупр=(\d+)\]/);
+      const mCtrlR = line.match(/\[стр:\s*упр=(\d+),\s*неупр=(\d+)\]/);
       const mKalB = line.match(/\[калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
       const mKalC = line.match(/\[стб_калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
+      const mKalR = line.match(/\[стр_калман:\s*T1=(\d+),\s*T2=(\d+),\s*T3=(\d+),\s*T4=(\d+)\]/);
       if (mCtrlB) lastMeta = { type: "ctrl_blocks", r: +mCtrlB[1], u: +mCtrlB[2] };
       else if (mCtrlC) lastMeta = { type: "ctrl_cols", r: +mCtrlC[1], u: +mCtrlC[2] };
+      else if (mCtrlR) lastMeta = { type: "ctrl_rows", r: +mCtrlR[1], u: +mCtrlR[2] };
       else if (mKalB) lastMeta = { type: "kalman_blocks", n1: +mKalB[1], n2: +mKalB[2], n3: +mKalB[3], n4: +mKalB[4] };
       else if (mKalC) lastMeta = { type: "kalman_cols", n1: +mKalC[1], n2: +mKalC[2], n3: +mKalC[3], n4: +mKalC[4] };
+      else if (mKalR) lastMeta = { type: "kalman_rows", n1: +mKalR[1], n2: +mKalR[2], n3: +mKalR[3], n4: +mKalR[4] };
       else lastMeta = null;
 
-      const cleanLine = line.replace(/\s*\[(блоки|стб|калман|стб_калман):[^\]]+\]/, "");
+      const cleanLine = line.replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/, "");
 
       if (/^\d+\)/.test(cleanLine) || cleanLine.endsWith("ПРОСТРАНСТВЕ СОСТОЯНИЙ:") || cleanLine.startsWith("ПОСТРОЕНИЕ ") || cleanLine.startsWith("ИТОГОВЫЙ ВЫВОД")) {
         html += `<div style="color:var(--cyan);font-weight:800;font-size:13.5px;margin:4px 0 6px;">${cleanLine}</div>`;
@@ -2528,6 +2536,7 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
     return html;
   }).join("");
 }
+
 function renderResultCard() {
   const box = document.getElementById("resultCardContainer");
   if (!state.resText && !state.resMatrix && !state.resGrid) { box.innerHTML = ""; return; }
