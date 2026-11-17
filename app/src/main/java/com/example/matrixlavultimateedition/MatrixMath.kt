@@ -1715,6 +1715,9 @@ class MatrixMath {
                 basisCols.add(candidate)
             }
         }
+        if (cleanB[0].size > 1) {
+            basisCols.sortBy { vec -> vec.indexOfFirst { abs(it) > 1e-6 }.let { if (it == -1) Int.MAX_VALUE else it } }
+        }
 
         // Если в последней строке выбранных столбцов есть отрицательные числа (Конспект 1, стр. 1) —
         // берем e_2 = [0,1,0]^T, иначе берем с конца e_n = [0,0,1]^T (Конспект 1 стр. 3-4 и Конспект 2 стр. 3)
@@ -2230,7 +2233,7 @@ class MatrixMath {
             var woMat: Array<DoubleArray>? = null
 
             // =========================================================
-            // 1) ПРОВЕРКА УПРАВЛЯЕМОСТИ И РАЗЛОЖЕНИЕ НА ПОДПРОСТРАНСТВА
+            // 1) ПРОВЕРКА УПРАВЛЯЕМОСТИ
             // =========================================================
             if (hasB) {
                 appendLine("1) ПРОВЕРКА УПРАВЛЯЕМОСТИ:")
@@ -2239,11 +2242,11 @@ class MatrixMath {
                 rankC = rank(wc)
                 isFullCtrl = (rankC == n)
 
-                appendLine("Матрица управляемости C(A,B) = U = [B, AB, A²B, ...]:")
+                appendLine("Матрица управляемости U = [B, AB, A²B, ...]:")
                 appendLine(formatMatrixAligned(wc))
                 if (wc.size == wc[0].size) {
                     val detU = determinant(wc) ?: 0.0
-                    appendLine("det(U) = ${String.format(Locale.US, "%.3f", detU).trimEnd('0').trimEnd('.')}")
+                    appendLine("det(U) = ${toCleanFractionString(detU)}")
                 }
                 appendLine("rank(U) = $rankC (при n = $n)")
 
@@ -2254,8 +2257,6 @@ class MatrixMath {
                     appendLine("➔ Вывод: система не является полностью управляемой.")
                     appendLine("• Управляемое подпространство: dim = $rankC")
                     appendLine("• Неуправляемое подпространство: dim = ${n - rankC}")
-                    appendLine()
-                    appendLine("Построим разложение Калмана на управляемое и неуправляемое подпространства:")
 
                     val kd = kalmanNotebookDecomposition(matA, cleanB)
                     if (kd != null) {
@@ -2267,26 +2268,30 @@ class MatrixMath {
                         val unEigs = eigenvalues(aUn)
                         isStabilizable = unEigs.all { it.re < -1e-7 }
 
-                        appendLine("Матрица преобразования S:")
-                        appendLine(formatMatrixAligned(sMat))
-                        appendLine("Обратная матрица S⁻¹:")
-                        appendLine(formatMatrixAligned(sInv))
-                        appendLine("Новая матрица Ã = S⁻¹ A S = [Ac, A12; 0, Au]:")
-                        appendLine(formatMatrixAligned(aTilde))
-                        appendLine("Новая матрица B̃ = S⁻¹ B:")
-                        appendLine(formatMatrixAligned(bTilde))
-                        appendLine("Управляемая часть Ac (${r}×$r):")
-                        appendLine(formatMatrixAligned(aCtrl))
-                        appendLine("Неуправляемая часть Au (${n - r}×${n - r}):")
-                        appendLine(formatMatrixAligned(aUn))
-                        appendLine("Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.joinToString(", ")} }")
+                        if (!hasC) {
+                            appendLine()
+                            appendLine("Построим разложение Калмана на управляемое и неуправляемое подпространства:")
+                            appendLine("Матрица преобразования S [стб: упр=$r, неупр=${n - r}]:")
+                            appendLine(formatMatrixAligned(sMat))
+                            appendLine("Обратная матрица S⁻¹:")
+                            appendLine(formatMatrixAligned(sInv))
+                            appendLine("Новая матрица Ã = S⁻¹ A S [блоки: упр=$r, неупр=${n - r}]:")
+                            appendLine(formatMatrixAligned(aTilde))
+                            appendLine("Новая матрица B̃ = S⁻¹ B [стр: упр=$r, неупр=${n - r}]:")
+                            appendLine(formatMatrixAligned(bTilde))
+                            appendLine("Управляемая часть Ac (${r}×$r):")
+                            appendLine(formatMatrixAligned(aCtrl))
+                            appendLine("Неуправляемая часть Au (${n - r}×${n - r}):")
+                            appendLine(formatMatrixAligned(aUn))
+                            appendLine("Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.joinToString(", ")} }")
 
-                        if (isStabilizable) {
-                            appendLine("➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).")
-                            appendLine("➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно.")
-                        } else {
-                            appendLine("➔ Есть собственные числа неуправляемой части с Re(λ) ≥ 0 (неуправляемая часть неустойчива).")
-                            appendLine("➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.")
+                            if (isStabilizable) {
+                                appendLine("➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).")
+                                appendLine("➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно.")
+                            } else {
+                                appendLine("➔ Есть собственные числа неуправляемой части с Re(λ) ≥ 0 (неуправляемая часть неустойчива).")
+                                appendLine("➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.")
+                            }
                         }
                     }
                 }
@@ -2294,7 +2299,7 @@ class MatrixMath {
             }
 
             // =========================================================
-            // 2) ПРОВЕРКА НАБЛЮДАЕМОСТИ И ДЕТЕКТИРУЕМОСТИ
+            // 2) ПРОВЕРКА НАБЛЮДАЕМОСТИ
             // =========================================================
             if (hasC) {
                 appendLine(if (hasB) "2) ПРОВЕРКА НАБЛЮДАЕМОСТИ:" else "1) ПРОВЕРКА НАБЛЮДАЕМОСТИ:")
@@ -2314,8 +2319,6 @@ class MatrixMath {
                     appendLine("➔ Вывод: система не является полностью наблюдаемой.")
                     appendLine("• Наблюдаемое подпространство: dim = $rankO")
                     appendLine("• Ненаблюдаемое подпространство: dim = ${n - rankO}")
-                    appendLine()
-                    appendLine("Проверка на детектируемость (разложение на наблюдаемое и ненаблюдаемое подпространства):")
 
                     val aT = transpose(matA); val cT = transpose(cleanC)
                     val kdObs = kalmanNotebookDecomposition(aT, cT)
@@ -2326,26 +2329,30 @@ class MatrixMath {
                         val unObsEigs = eigenvalues(aUnObs)
                         isDetectable = unObsEigs.all { it.re < -1e-7 }
 
-                        val tObs = transpose(tInvDual); val tObsInv = transpose(tMatDual)
-                        val aTildeObs = multiply(multiply(tObsInv, matA)!!, tObs)!!
-                        val cTildeObs = multiply(cleanC, tObs)!!
+                        if (!hasB) {
+                            val tObs = transpose(tInvDual); val tObsInv = transpose(tMatDual)
+                            val aTildeObs = multiply(multiply(tObsInv, matA)!!, tObs)!!
+                            val cTildeObs = multiply(cleanC, tObs)!!
 
-                        appendLine("Матрица перехода T_o:")
-                        appendLine(formatMatrixAligned(tObs))
-                        appendLine("Обратная матрица T_o⁻¹:")
-                        appendLine(formatMatrixAligned(tObsInv))
-                        appendLine("Матрица Ã_o = T_o⁻¹ A T_o:")
-                        appendLine(formatMatrixAligned(aTildeObs))
-                        appendLine("Матрица C̃_o = C T_o:")
-                        appendLine(formatMatrixAligned(cTildeObs))
-                        appendLine("Собственные числа ненаблюдаемой части: λ = { ${unObsEigs.joinToString(", ")} }")
+                            appendLine()
+                            appendLine("Построим разложение на наблюдаемое и ненаблюдаемое подпространства:")
+                            appendLine("Матрица перехода T_o:")
+                            appendLine(formatMatrixAligned(tObs))
+                            appendLine("Обратная матрица T_o⁻¹:")
+                            appendLine(formatMatrixAligned(tObsInv))
+                            appendLine("Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=$rObs, неупр=${n - rObs}]:")
+                            appendLine(formatMatrixAligned(aTildeObs))
+                            appendLine("Матрица C̃_o = C T_o:")
+                            appendLine(formatMatrixAligned(cTildeObs))
+                            appendLine("Собственные числа ненаблюдаемой части: λ = { ${unObsEigs.joinToString(", ")} }")
 
-                        if (isDetectable) {
-                            appendLine("➔ Ненаблюдаемая часть устойчива (Re(λ) < 0).")
-                            appendLine("➔ Вывод: система ДЕТЕКТИРУЕМА. Наблюдатель построить можно.")
-                        } else {
-                            appendLine("➔ Ненаблюдаемая часть неустойчива (есть Re(λ) ≥ 0).")
-                            appendLine("➔ Вывод: система НЕ ДЕТЕКТИРУЕМА. Наблюдатель построить нельзя.")
+                            if (isDetectable) {
+                                appendLine("➔ Ненаблюдаемая часть устойчива (Re(λ) < 0).")
+                                appendLine("➔ Вывод: система ДЕТЕКТИРУЕМА. Наблюдатель построить можно.")
+                            } else {
+                                appendLine("➔ Ненаблюдаемая часть неустойчива (есть Re(λ) ≥ 0).")
+                                appendLine("➔ Вывод: система НЕ ДЕТЕКТИРУЕМА. Наблюдатель построить нельзя.")
+                            }
                         }
                     }
                 }
@@ -2353,10 +2360,10 @@ class MatrixMath {
             }
 
             // =========================================================
-            // 3) ПОЛНОЕ 4-БЛОЧНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T1, T2, T3, T4]
+            // 3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T1, T2, T3, T4] (Конспект 3)
             // =========================================================
             if (hasB && hasC && (!isFullCtrl || !isFullObs) && wcMat != null && woMat != null) {
-                appendLine("3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T₁ T₂ T₃ T₄] (Конспект 3):")
+                appendLine("3) ПОСТРОЕНИЕ РАЗЛОЖЕНИЯ КАЛМАНА T = [T₁ T₂ T₃ T₄]:")
                 val imU = columnSpaceBasis(wcMat)
                 val kerO = realNullspaceBasis(woMat)
                 val t2 = intersectSubspaces(imU, kerO, n)
@@ -2375,15 +2382,12 @@ class MatrixMath {
                 }
 
                 fun fmt(l: List<DoubleArray>) = if (l.isEmpty()) "∅ (нет)" else l.joinToString(", ") { v ->
-                    "[" + v.joinToString("; ") { x ->
-                        if (abs(x - kotlin.math.round(x)) < 1e-5) kotlin.math.round(x).toLong().toString()
-                        else String.format(Locale.US, "%.3f", x)
-                    } + "]ᵀ"
+                    "[" + v.joinToString("; ") { x -> toCleanFractionString(x) } + "]ᵀ"
                 }
 
                 appendLine("1. Образ Im U(A,B) = span{ ${fmt(imU)} }")
                 appendLine("2. Ядро Ker O(A,C) = span{ ${fmt(kerO)} }")
-                appendLine("3. Пересечение Im U ∩ Ker O (T₂ — упр., ненабл.): ${fmt(t2)}")
+                appendLine("3. Пересечение Im U ∩ Ker O (блок T₂ — упр., ненабл.): ${fmt(t2)}")
                 appendLine("4. Блок T₁ (упр., набл.): ${fmt(t1)}")
                 appendLine("5. Блок T₄ (неупр., ненабл.): ${fmt(t4)}")
                 appendLine("6. Блок T₃ (неупр., набл.): ${fmt(t3)}")
@@ -2396,16 +2400,49 @@ class MatrixMath {
                         val aHat = multiply(multiply(tFullInv, matA)!!, tFull)!!
                         val bHat = multiply(tFullInv, cleanB)!!
                         val cHat = multiply(cleanC, tFull)!!
-                        appendLine("Матрица замены T = [T₁ T₂ T₃ T₄]:")
+                        val n1 = t1.size; val n2 = t2.size; val n3 = t3.size; val n4 = t4.size
+
+                        appendLine()
+                        appendLine("Матрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=$n1, T2=$n2, T3=$n3, T4=$n4]:")
                         appendLine(formatMatrixAligned(tFull))
                         appendLine("Обратная матрица T⁻¹:")
                         appendLine(formatMatrixAligned(tFullInv))
-                        appendLine("Матрица Â = T⁻¹ A T:")
+                        appendLine("Матрица Â = T⁻¹ A T [калман: T1=$n1, T2=$n2, T3=$n3, T4=$n4]:")
                         appendLine(formatMatrixAligned(aHat))
-                        appendLine("Матрица B̂ = T⁻¹ B:")
+                        appendLine("Матрица B̂ = T⁻¹ B [стр_калман: T1=$n1, T2=$n2, T3=$n3, T4=$n4]:")
                         appendLine(formatMatrixAligned(bHat))
-                        appendLine("Матрица Ĉ = C T:")
+                        appendLine("Матрица Ĉ = C T [стб_калман: T1=$n1, T2=$n2, T3=$n3, T4=$n4]:")
                         appendLine(formatMatrixAligned(cHat))
+
+                        appendLine()
+                        appendLine("Анализ подпространств по блокам матрицы Â:")
+                        var offset = 0
+                        if (n1 > 0) {
+                            val b1 = Array(n1) { i -> DoubleArray(n1) { j -> aHat[offset + i][offset + j] } }
+                            val e1 = eigenvalues(b1)
+                            appendLine("• Управляемая и наблюдаемая часть (T₁, ${n1}×$n1): λ = { ${e1.joinToString(", ")} }")
+                            offset += n1
+                        }
+                        if (n2 > 0) {
+                            val b2 = Array(n2) { i -> DoubleArray(n2) { j -> aHat[offset + i][offset + j] } }
+                            val e2 = eigenvalues(b2)
+                            val ok = e2.all { it.re < -1e-7 }
+                            appendLine("• Управляемая, ненаблюдаемая часть (T₂, ${n2}×$n2): λ = { ${e2.joinToString(", ")} } ➔ ${if (ok) "устойчива (детектируема)" else "неустойчива (не детектируема)"}")
+                            offset += n2
+                        }
+                        if (n3 > 0) {
+                            val b3 = Array(n3) { i -> DoubleArray(n3) { j -> aHat[offset + i][offset + j] } }
+                            val e3 = eigenvalues(b3)
+                            val ok = e3.all { it.re < -1e-7 }
+                            appendLine("• Неуправляемая, наблюдаемая часть (T₃, ${n3}×$n3): λ = { ${e3.joinToString(", ")} } ➔ ${if (ok) "устойчива (стабилизируема)" else "неустойчива (не стабилизируема)"}")
+                            offset += n3
+                        }
+                        if (n4 > 0) {
+                            val b4 = Array(n4) { i -> DoubleArray(n4) { j -> aHat[offset + i][offset + j] } }
+                            val e4 = eigenvalues(b4)
+                            val ok = e4.all { it.re < -1e-7 }
+                            appendLine("• Неуправляемая и ненаблюдаемая часть (T₄, ${n4}×$n4): λ = { ${e4.joinToString(", ")} } ➔ ${if (ok) "устойчива (стабилизируема и детектируема)" else "неустойчива (не стабилизируема и не детектируема)"}")
+                        }
                     }
                 }
                 appendLine("════════════════════════════════")
@@ -2416,22 +2453,17 @@ class MatrixMath {
             // =========================================================
             if (hasB && hasC) {
                 appendLine("ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ:")
-                when {
-                    isFullCtrl && isFullObs ->
-                        appendLine("Вывод: система полностью управляема и наблюдаема.\nРегулятор и наблюдатель построить можно.")
-                    isFullCtrl && !isFullObs && isDetectable ->
-                        appendLine("Вывод: система полностью управляема и детектируема.\nРегулятор и наблюдатель построить можно.")
-                    isFullCtrl && !isFullObs && !isDetectable ->
-                        appendLine("Вывод: система полностью управляема, но не детектируема.\nРегулятор построить можно. Наблюдатель построить нельзя.")
-                    !isFullCtrl && isFullObs && isStabilizable ->
-                        appendLine("Вывод: система полностью наблюдаема и стабилизируема.\nНаблюдатель и регулятор построить можно.")
-                    !isFullCtrl && isFullObs && !isStabilizable ->
-                        appendLine("Вывод: система полностью наблюдаема, но не стабилизируема.\nНаблюдатель построить можно. Регулятор построить нельзя.")
-                    else -> {
-                        val rTxt = if (isStabilizable) "Система стабилизируема (регулятор построить можно)." else "Система не стабилизируема (регулятор построить нельзя)."
-                        val oTxt = if (isDetectable) "Система детектируема (наблюдатель построить можно)." else "Система не детектируема (наблюдатель построить нельзя)."
-                        appendLine("Вывод: система не является полностью управляемой и наблюдаемой.\n• $rTxt\n• $oTxt")
-                    }
+                if (!isFullCtrl) {
+                    appendLine(if (isStabilizable) "✅ Неуправляемая часть устойчива ➔ Система СТАБИЛИЗИРУЕМА (регулятор построить можно)."
+                    else "❌ Неуправляемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ СТАБИЛИЗИРУЕМА (регулятор построить нельзя).")
+                } else {
+                    appendLine("✅ Система полностью управляема (регулятор построить можно).")
+                }
+                if (!isFullObs) {
+                    appendLine(if (isDetectable) "✅ Ненаблюдаемая часть устойчива ➔ Система ДЕТЕКТИРУЕМА (наблюдатель построить можно)."
+                    else "❌ Ненаблюдаемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА (наблюдатель построить нельзя).")
+                } else {
+                    appendLine("✅ Система полностью наблюдаема (наблюдатель построить можно).")
                 }
                 appendLine("════════════════════════════════")
             }

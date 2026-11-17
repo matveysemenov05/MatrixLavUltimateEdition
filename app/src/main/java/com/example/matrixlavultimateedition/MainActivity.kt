@@ -2410,7 +2410,7 @@ fun ResultCardBlock(
     onTransferToC: ((Array<DoubleArray>) -> Unit)? = null
 ) {
     val hasResult = lastResultMatrix != null || lastResultGrid != null || resultScalarText.isNotEmpty()
-    var symbolicMode by remember { mutableStateOf(true) }
+    var symbolicMode by remember { mutableStateOf(false) }
     val alreadyHasFormattedMatrixInText = resultScalarText.contains("⎡") || resultScalarText.contains("⎣") || resultScalarText.contains("│")
 
     val displayedScalarText = remember(resultScalarText, symbolicMode) {
@@ -2442,7 +2442,7 @@ fun ResultCardBlock(
                         overflow = TextOverflow.Ellipsis
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (lastResultMatrix != null && !isError && !alreadyHasFormattedMatrixInText) {
+                        if ((lastResultMatrix != null || alreadyHasFormattedMatrixInText) && !isError) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(7.dp))
@@ -2493,7 +2493,11 @@ fun ResultCardBlock(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 if (displayedScalarText.isNotEmpty()) {
-                    RichReportComposeView(displayedScalarText, screenWidth)
+                    RichReportComposeView(
+                        reportText = displayedScalarText,
+                        screenWidth = screenWidth,
+                        symbolicMode = symbolicMode
+                    )
                 }
 
                 if (lastResultGrid != null) {
@@ -2551,12 +2555,12 @@ fun ResultCardBlock(
     }
 }
 
-/**
- * Умный PRO-рендерер математического отчёта:
- * Превращает текстовые секции, матрицы со скобками ⎡ ⎢ ⎣ и выводы в красивые UI-карточки и таблицы с дробями!
- */
 @Composable
-fun RichReportComposeView(reportText: String, screenWidth: Dp) {
+fun RichReportComposeView(
+    reportText: String,
+    screenWidth: Dp,
+    symbolicMode: Boolean = false
+) {
     val sections = remember(reportText) {
         reportText.split(Regex("[═─]{6,}")).map { it.trim() }.filter { it.isNotEmpty() }
     }
@@ -2574,11 +2578,12 @@ fun RichReportComposeView(reportText: String, screenWidth: Dp) {
             ) {
                 val lines = sec.lines()
                 var i = 0
+                var lastMetaTag = ""
+
                 while (i < lines.size) {
                     val line = lines[i].trim()
                     if (line.isEmpty()) { i++; continue }
 
-                    // 1. Проверяем, начинается ли здесь блок матрицы (⎡, ⎢, ⎣, │ или одиночная матрица [ ... ])
                     val isMatLine = { s: String ->
                         val t = s.trim()
                         t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
@@ -2600,29 +2605,31 @@ fun RichReportComposeView(reportText: String, screenWidth: Dp) {
                             MatrixResultGridAdaptive(
                                 matrix = matRows.toTypedArray(),
                                 screenWidth = screenWidth,
-                                symbolicMode = true,
-                                isExpMode = false
+                                symbolicMode = symbolicMode,
+                                isExpMode = false,
+                                subspaceMeta = lastMetaTag
                             )
                         }
+                        lastMetaTag = ""
                         continue
                     }
 
-                    // 2. Заголовки шагов
-                    if (line.matches(Regex("^\\d+\\).*")) || line.endsWith("СИСТЕМА В ПРОСТРАНСТВЕ СОСТОЯНИЙ:") ||
-                        line.startsWith("ПОСТРОЕНИЕ ") || line.startsWith("ИТОГОВЫЙ ВЫВОД")
+                    lastMetaTag = Regex("\\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\\]]+\\]").find(line)?.value ?: ""
+                    val cleanLine = line.replace(Regex("\\s*\\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\\]]+\\]"), "")
+
+                    if (cleanLine.matches(Regex("^\\d+\\).*")) || cleanLine.endsWith("СИСТЕМА В ПРОСТРАНСТВЕ СОСТОЯНИЙ:") ||
+                        cleanLine.startsWith("ПОСТРОЕНИЕ ") || cleanLine.startsWith("ИТОГОВЫЙ ВЫВОД")
                     ) {
                         Text(
-                            text = line,
+                            text = cleanLine,
                             color = AccentCyan,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
                         )
-                    }
-                    // 3. Плашки выводов (➔ Вывод, ✅, ❌, ⚠️)
-                    else if (line.startsWith("➔") || line.startsWith("✅") || line.startsWith("❌") || line.startsWith("⚠️")) {
-                        val isBad = line.contains("НЕ ") || line.startsWith("❌")
-                        val isGood = line.contains("СТАБИЛИЗИРУЕМА") || line.contains("ДЕТЕКТИРУЕМА") || line.contains("полностью") || line.startsWith("✅")
+                    } else if (cleanLine.startsWith("➔") || cleanLine.startsWith("✅") || cleanLine.startsWith("❌") || cleanLine.startsWith("⚠️")) {
+                        val isBad = cleanLine.contains("НЕ ") || cleanLine.startsWith("❌")
+                        val isGood = cleanLine.contains("СТАБИЛИЗИРУЕМА") || cleanLine.contains("ДЕТЕКТИРУЕМА") || cleanLine.contains("полностью") || cleanLine.startsWith("✅")
                         val badgeColor = when {
                             isBad -> Color(0xFFF87171)
                             isGood -> AccentEmerald
@@ -2636,11 +2643,9 @@ fun RichReportComposeView(reportText: String, screenWidth: Dp) {
                                 .border(1.dp, badgeColor.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
                                 .padding(horizontal = 10.dp, vertical = 7.dp)
                         ) {
-                            Text(text = line, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            Text(text = cleanLine, color = badgeColor, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                         }
-                    }
-                    // 4. Выделенная плашка закона управления u = Θx = ...
-                    else if (line.startsWith("u =") || line.startsWith("λ =")) {
+                    } else if (cleanLine.startsWith("u =") || cleanLine.startsWith("λ =")) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2649,14 +2654,12 @@ fun RichReportComposeView(reportText: String, screenWidth: Dp) {
                                 .border(1.dp, AccentPurple.copy(alpha = 0.5f), RoundedCornerShape(9.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
-                            Text(text = line, color = TextWhite, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp, fontFamily = FontFamily.Monospace)
+                            Text(text = cleanLine, color = TextWhite, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp, fontFamily = FontFamily.Monospace)
                         }
-                    }
-                    // 5. Подписи к матрицам и обычные строки
-                    else {
-                        val isLabel = line.endsWith(":")
+                    } else {
+                        val isLabel = cleanLine.endsWith(":")
                         Text(
-                            text = line,
+                            text = cleanLine,
                             color = if (isLabel) AccentAmber else TextWhite,
                             fontWeight = if (isLabel) FontWeight.SemiBold else FontWeight.Normal,
                             fontSize = 12.5.sp,
@@ -2669,7 +2672,6 @@ fun RichReportComposeView(reportText: String, screenWidth: Dp) {
         }
     }
 }
-
 data class SymbolicToken(
     val sign: String = "",
     val whole: String = "",
@@ -2681,80 +2683,154 @@ data class SymbolicToken(
     val isFraction: Boolean get() = num.isNotEmpty() && den.isNotEmpty()
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MatrixResultGridAdaptive(
     matrix: Array<DoubleArray>,
     screenWidth: Dp,
     symbolicMode: Boolean = false,
-    isExpMode: Boolean = false
+    isExpMode: Boolean = false,
+    subspaceMeta: String = ""
 ) {
     val rows = matrix.size; if (rows == 0) return; val cols = matrix[0].size; if (cols == 0) return
 
     val cellWidth = ((screenWidth - 68.dp) / cols).coerceIn(78.dp, 112.dp)
     val cellHeight = if (symbolicMode) 48.dp else 38.dp
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
+    val ctrlB = Regex("\\[блоки:\\s*упр=(\\d+),\\s*неупр=(\\d+)\\]").find(subspaceMeta)
+    val ctrlC = Regex("\\[стб:\\s*упр=(\\d+),\\s*неупр=(\\d+)\\]").find(subspaceMeta)
+    val ctrlR = Regex("\\[стр:\\s*упр=(\\d+),\\s*неупр=(\\d+)\\]").find(subspaceMeta)
+    val kalB = Regex("\\[калман:\\s*T1=(\\d+),\\s*T2=(\\d+),\\s*T3=(\\d+),\\s*T4=(\\d+)\\]").find(subspaceMeta)
+    val kalC = Regex("\\[стб_калман:\\s*T1=(\\d+),\\s*T2=(\\d+),\\s*T3=(\\d+),\\s*T4=(\\d+)\\]").find(subspaceMeta)
+    val kalR = Regex("\\[стр_калман:\\s*T1=(\\d+),\\s*T2=(\\d+),\\s*T3=(\\d+),\\s*T4=(\\d+)\\]").find(subspaceMeta)
+
+    fun cellZoneColor(r: Int, c: Int): Color? {
+        if (ctrlB != null) {
+            val rC = ctrlB.groupValues[1].toInt()
+            if (r < rC && c < rC) return AccentEmerald
+            if (r >= rC && c >= rC) return Color(0xFFF87171)
+            if (r < rC && c >= rC) return AccentPurple.copy(alpha = 0.6f)
+        } else if (ctrlC != null) {
+            val rC = ctrlC.groupValues[1].toInt()
+            return if (c < rC) AccentEmerald else Color(0xFFF87171)
+        } else if (ctrlR != null) {
+            val rC = ctrlR.groupValues[1].toInt()
+            return if (r < rC) AccentEmerald else Color(0xFFF87171)
+        } else if (kalB != null || kalC != null || kalR != null) {
+            val m = (kalB ?: kalC ?: kalR)!!
+            val n1 = m.groupValues[1].toInt(); val n2 = m.groupValues[2].toInt(); val n3 = m.groupValues[3].toInt()
+            val colZ = when { c < n1 -> 1; c < n1 + n2 -> 2; c < n1 + n2 + n3 -> 3; else -> 4 }
+            val rowZ = when { r < n1 -> 1; r < n1 + n2 -> 2; r < n1 + n2 + n3 -> 3; else -> 4 }
+            fun zColor(z: Int) = when (z) { 1 -> AccentEmerald; 2 -> AccentCyan; 3 -> AccentAmber; else -> Color(0xFFF87171) }
+            if (kalC != null) return zColor(colZ)
+            if (kalR != null) return zColor(rowZ)
+            if (rowZ == colZ) return zColor(rowZ)
+        }
+        return null
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
             modifier = Modifier
-                .height((rows * (cellHeight.value + 5f)).dp)
-                .width(3.5.dp)
-                .background(AccentEmerald, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            for (i in 0 until rows) {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    for (j in 0 until cols) {
-                        val value = matrix[i][j]
-                        Box(
-                            modifier = Modifier
-                                .width(cellWidth)
-                                .height(cellHeight)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF0B1322))
-                                .border(
-                                    1.dp,
-                                    if (symbolicMode) AccentCyan.copy(alpha = 0.3f) else Color(0xFF1F2E47),
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .padding(horizontal = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!symbolicMode) {
-                                val txt = formatNumber(value)
-                                Text(
-                                    text = txt,
-                                    color = TextWhite,
-                                    fontSize = if (txt.length > 8) 11.sp else 13.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            } else {
-                                val token = toSymbolicToken(value, isExpMode)
-                                PrettySymbolicTokenCell(token)
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .height((rows * (cellHeight.value + 5f)).dp)
+                    .width(3.5.dp)
+                    .background(AccentEmerald, RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                for (i in 0 until rows) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        for (j in 0 until cols) {
+                            val value = matrix[i][j]
+                            val zCol = cellZoneColor(i, j)
+                            Box(
+                                modifier = Modifier
+                                    .width(cellWidth)
+                                    .height(cellHeight)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(zCol?.copy(alpha = 0.16f) ?: Color(0xFF0B1322))
+                                    .border(
+                                        if (zCol != null) 1.5.dp else 1.dp,
+                                        zCol ?: if (symbolicMode) AccentCyan.copy(alpha = 0.3f) else Color(0xFF1F2E47),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!symbolicMode) {
+                                    val txt = formatNumber(value)
+                                    Text(
+                                        text = txt,
+                                        color = TextWhite,
+                                        fontSize = if (txt.length > 8) 11.sp else 13.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                } else {
+                                    val token = toSymbolicToken(value, isExpMode)
+                                    PrettySymbolicTokenCell(token)
+                                }
                             }
                         }
                     }
                 }
             }
+            Spacer(modifier = Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .height((rows * (cellHeight.value + 5f)).dp)
+                    .width(3.5.dp)
+                    .background(AccentEmerald, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+            )
         }
-        Spacer(modifier = Modifier.width(6.dp))
-        Box(
-            modifier = Modifier
-                .height((rows * (cellHeight.value + 5f)).dp)
-                .width(3.5.dp)
-                .background(AccentEmerald, RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-        )
+
+        val legendItems = remember(subspaceMeta) {
+            buildList {
+                if (ctrlB != null || ctrlC != null || ctrlR != null) {
+                    val m = (ctrlB ?: ctrlC ?: ctrlR)!!
+                    add(Pair("🟩 Управляемая (${m.groupValues[1]})", AccentEmerald))
+                    add(Pair("🟥 Неуправляемая (${m.groupValues[2]})", Color(0xFFF87171)))
+                } else if (kalB != null || kalC != null || kalR != null) {
+                    val m = (kalB ?: kalC ?: kalR)!!
+                    val n1 = m.groupValues[1].toInt(); val n2 = m.groupValues[2].toInt()
+                    val n3 = m.groupValues[3].toInt(); val n4 = m.groupValues[4].toInt()
+                    if (n1 > 0) add(Pair("🟩 T₁ ($n1): упр., набл.", AccentEmerald))
+                    if (n2 > 0) add(Pair("🟦 T₂ ($n2): упр., ненабл.", AccentCyan))
+                    if (n3 > 0) add(Pair("🟨 T₃ ($n3): неупр., набл.", AccentAmber))
+                    if (n4 > 0) add(Pair("🟥 T₄ ($n4): неупр., ненабл.", Color(0xFFF87171)))
+                }
+            }
+        }
+        if (legendItems.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                legendItems.forEach { (label, col) ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(col.copy(alpha = 0.14f))
+                            .border(1.dp, col, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(label, color = col, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2852,7 +2928,7 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
         return if (a == 0L) 1L else a
     }
 
-    fun findExactFraction(x: Double, maxQ: Long = 9999L, tol: Double = 1e-6): Pair<Long, Long>? {
+    fun findExactFraction(x: Double, maxQ: Long = 64L, tol: Double = 1e-6): Pair<Long, Long>? {
         val ax = abs(x)
         if (ax < 1e-7 || ax > 1e7) return null
         var h1 = 1L; var h2 = 0L
@@ -2877,10 +2953,12 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
     val signStr = if (value < 0) "−" else ""
     val absVal = abs(value)
 
+    // 1. Сначала проверяем только короткие точные дроби со знаменателем до 16
     findExactFraction(absVal, maxQ = 16L, tol = 1e-6)?.let { (p, q) ->
         return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
     }
 
+    // 2. Полный режим экспоненты e^A (одиночные e^k и комбинации двух экспонент a*e^k1 + b*e^k2)
     if (isExpMode) {
         val powers = (1..25).toList() + (-1 downTo -15).toList()
         for (k in powers) {
@@ -2950,6 +3028,7 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
         }
     }
 
+    // 3. Корни √2, √3, √5, √6, √7
     for (rad in listOf(2, 3, 5, 6, 7)) {
         val rVal = kotlin.math.sqrt(rad.toDouble())
         val rStr = "√$rad"
@@ -2986,13 +3065,15 @@ fun toSymbolicToken(value: Double, isExpMode: Boolean = false): SymbolicToken {
         }
     }
 
-    findExactFraction(absVal, maxQ = 9999L, tol = 1e-3)?.let { (p, q) ->
-        return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
+    // 4. Аккуратные дроби со знаменателем до 64 (без огромных 48214/125!)
+    findExactFraction(absVal, maxQ = 64L, tol = 5e-4)?.let { (p, q) ->
+        if (p <= 999L) {
+            return SymbolicToken(sign = signStr, num = p.toString(), den = q.toString())
+        }
     }
 
     return SymbolicToken(plainText = formatNumber(value))
 }
-
 fun formatSymbolic(value: Double): String {
     val t = toSymbolicToken(value)
     return if (!t.isFraction) {
