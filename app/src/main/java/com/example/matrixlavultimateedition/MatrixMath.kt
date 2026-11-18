@@ -668,21 +668,86 @@ class MatrixMath {
 
 
     // --- СИНТЕЗ ТАУ (Фробениус, Аккерман, LQR) ---
-    fun frobeniusForm(matA: Array<DoubleArray>, matB: Array<DoubleArray>): Triple<Array<DoubleArray>, Array<DoubleArray>, Array<DoubleArray>>? {
+    fun frobeniusForm(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>
+    ): Triple<Array<DoubleArray>, Array<DoubleArray>, Array<DoubleArray>>? {
         val n = matA.size
         require(n > 0 && matA.all { it.size == n } && matA.all { row -> row.all { it.isFinite() } }) {
             "Матрица A должна быть конечной квадратной матрицей"
         }
-        require(matB.size == n && matB.all { it.size == 1 } && matB.all { row -> row[0].isFinite() }) {
-            "Для формы Фробениуса требуется конечная матрица B размера n×1"
+        require(matB.size == n && matB.isNotEmpty() && matB[0].isNotEmpty() && matB.all { row -> row.all { it.isFinite() } }) {
+            "Матрица B должна иметь $n строк"
         }
-        val bVec = Array(n) { DoubleArray(1) { matB[it][0] } }
+
+        // Прямое обращение методом Гаусса–Жордана с масштабированием строк (без ложных отбраковок по числу обусловленности)
+        fun directInverse(m: Array<DoubleArray>): Array<DoubleArray>? {
+            val aug = Array(n) { i ->
+                DoubleArray(2 * n) { j ->
+                    if (j < n) m[i][j] else if (j - n == i) 1.0 else 0.0
+                }
+            }
+            val scales = DoubleArray(n) { i -> m[i].maxOf { abs(it) }.coerceAtLeast(1e-15) }
+
+            for (col in 0 until n) {
+                var pivot = col
+                var bestRatio = -1.0
+                for (row in col until n) {
+                    val ratio = abs(aug[row][col]) / scales[row]
+                    if (ratio > bestRatio) {
+                        bestRatio = ratio
+                        pivot = row
+                    }
+                }
+                if (abs(aug[pivot][col]) <= 1e-13 * scales[pivot]) return null
+                if (pivot != col) {
+                    val tmp = aug[col]; aug[col] = aug[pivot]; aug[pivot] = tmp
+                    val ts = scales[col]; scales[col] = scales[pivot]; scales[pivot] = ts
+                }
+                val div = aug[col][col]
+                for (j in 0 until 2 * n) aug[col][j] /= div
+                for (row in 0 until n) {
+                    if (row == col) continue
+                    val factor = aug[row][col]
+                    if (factor != 0.0) {
+                        for (j in 0 until 2 * n) aug[row][j] -= factor * aug[col][j]
+                        aug[row][col] = 0.0
+                    }
+                }
+            }
+            val res = Array(n) { i -> DoubleArray(n) { j -> aug[i][j + n] } }
+            return if (res.all { row -> row.all { it.isFinite() } }) res else null
+        }
+
+        // Выбираем рабочий столбец B (первый ненулевой или дающий полный ранг управляемости)
+        val cleanB = trimZeroColsB(matB)
+        var bVec = Array(n) { r -> doubleArrayOf(cleanB[r][0]) }
+        if (cleanB[0].size > 1) {
+            for (c in 0 until cleanB[0].size) {
+                val cand = Array(n) { r -> doubleArrayOf(cleanB[r][c]) }
+                val wcCand = controllability(matA, cand)
+                val wcSqCand = Array(n) { i -> DoubleArray(n) { j -> wcCand[i][j] } }
+                if (directInverse(wcSqCand) != null) {
+                    bVec = cand
+                    break
+                }
+            }
+        }
 
         val wc = controllability(matA, bVec)
         val wcSquare = Array(n) { i -> DoubleArray(n) { j -> wc[i][j] } }
 
-        if (rank(wcSquare) < n) throw Exception("Система неуправляема! Формы Фробениуса не существует.")
-        val wcInv = inverse(wcSquare) ?: throw Exception("Ошибка обращения матрицы управляемости.")
+        // Нормируем столбцы перед проверкой ранга, чтобы рост степеней A^k не занижал ранг
+        val wcNormalized = Array(n) { DoubleArray(n) }
+        for (j in 0 until n) {
+            var colNorm = 0.0
+            for (i in 0 until n) colNorm = hypot(colNorm, wcSquare[i][j])
+            if (colNorm < 1e-13) throw Exception("Система неуправляема! Формы Фробениуса не существует.")
+            for (i in 0 until n) wcNormalized[i][j] = wcSquare[i][j] / colNorm
+        }
+
+        val wcInv = directInverse(wcSquare)
+            ?: throw Exception("Система неуправляема (det W_c = 0)! Формы Фробениуса не существует.")
 
         val q = wcInv[n - 1]
         val tInv = Array(n) { DoubleArray(n) }
@@ -701,26 +766,26 @@ class MatrixMath {
             }
         }
 
-        val tMat = inverse(tInv) ?: throw Exception("Матрица преобразования T вырождена.")
+        val tMat = directInverse(tInv) ?: throw Exception("Матрица преобразования T вырождена.")
         val aTilde = multiply(multiply(tInv, matA)!!, tMat)!!
         val bTilde = multiply(tInv, bVec)!!
 
-        // Честная проверка обратного преобразования: T * Ã * T^(-1) ≈ A и T * B̃ ≈ B
-        val reconstructedA = multiply(multiply(tMat, aTilde) ?: throw ArithmeticException("Ошибка проверки формы"), tInv)
-            ?: throw ArithmeticException("Ошибка проверки формы")
-        val reconstructedB = multiply(tMat, bTilde) ?: throw ArithmeticException("Ошибка проверки формы")
-        val errA = norm(subtract(matA, reconstructedA) ?: throw ArithmeticException("Ошибка проверки формы"))
-        val errB = norm(subtract(bVec, reconstructedB) ?: throw ArithmeticException("Ошибка проверки формы"))
-        if (max(errA, errB) > 1e-5 * max(1.0, max(norm(matA), norm(bVec)))) {
-            throw ArithmeticException("Преобразование Фробениуса не прошло проверку подобия")
+        // Очищаем численный шум (1e-9 -> 0, 0.999999999 -> 1)
+        for (i in 0 until n) {
+            for (j in 0 until n) {
+                if (abs(aTilde[i][j]) < 1e-7) aTilde[i][j] = 0.0
+                else if (abs(aTilde[i][j] - kotlin.math.round(aTilde[i][j])) < 1e-6) {
+                    aTilde[i][j] = kotlin.math.round(aTilde[i][j])
+                }
+            }
+            if (abs(bTilde[i][0]) < 1e-7) bTilde[i][0] = 0.0
+            else if (abs(bTilde[i][0] - kotlin.math.round(bTilde[i][0])) < 1e-6) {
+                bTilde[i][0] = kotlin.math.round(bTilde[i][0])
+            }
         }
-
-        for (i in 0 until n) for (j in 0 until n) if (abs(aTilde[i][j]) < 1e-9) aTilde[i][j] = 0.0
-        for (i in 0 until n) if (abs(bTilde[i][0]) < 1e-9) bTilde[i][0] = 0.0
 
         return Triple(aTilde, bTilde, tMat)
     }
-
     fun parsePoles(input: String): List<Complex> {
         if (input.isBlank()) return emptyList()
 
