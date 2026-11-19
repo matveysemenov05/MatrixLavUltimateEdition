@@ -2385,6 +2385,11 @@ function renderOperationsPanel() {
       <div class="btn-row">
         <button class="op-btn purple" onclick="openLqrModal()">LQR-оптимизация (Уравнение Риккати CARE)</button>
       </div>
+      <div class="sec-header">Преобразование «Вход–Выход» W(s) ⇄ «Пространство состояний» (A,B,C)</div>
+      <div class="btn-row">
+        <button class="op-btn" onclick="openTfToSsModal()">W(s) ➔ (A, B, C)</button>
+        <button class="op-btn purple" onclick="runSsToTfCalc()">(A, B, C) ➔ W(s)</button>
+      </div>
       <div class="sec-header">Высшие матричные функции от [A (${state.tauN}×${state.tauN})]</div>
       <div class="btn-row">
         <button class="op-btn" onclick="showMatrixResult(math.matrixExponential(getParsedMatrix(0)), 'Экспонента e^A')">e^A</button>
@@ -2524,6 +2529,18 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
         const col = bad ? "#F87171" : good ? "var(--emerald)" : "var(--amber)";
         const bg = bad ? "rgba(248,113,113,0.12)" : good ? "rgba(112,225,161,0.12)" : "rgba(255,209,102,0.12)";
         html += `<div style="background:${bg};border:1px solid ${col};color:${col};border-radius:9px;padding:7px 10px;font-weight:700;font-size:12.5px;margin:5px 0;">${cleanLine}</div>`;
+      } else if (cleanLine.includes("[ПФ:") && cleanLine.includes("///")) {
+        const prefix = cleanLine.split("[ПФ:")[0].trim();
+        const inside = cleanLine.split("[ПФ:")[1].replace(/\]$/, "").trim();
+        const [numStr, denStr] = inside.split("///").map(s => s.trim());
+        html += `<div style="background:rgba(182,154,255,0.14);border:1px solid var(--purple);border-radius:10px;padding:10px 14px;margin:6px 0;display:flex;align-items:center;justify-content:center;gap:10px;overflow-x:auto;">
+          <span style="font-family:monospace;font-weight:800;font-size:14px;color:var(--text-white);white-space:nowrap;">${prefix}</span>
+          <span style="display:inline-flex;flex-direction:column;align-items:center;font-family:monospace;font-weight:800;font-size:13.5px;">
+            <span style="color:var(--emerald);padding:0 8px;white-space:nowrap;">${numStr}</span>
+            <span style="width:100%;height:1.5px;background:var(--cyan);margin:3px 0;"></span>
+            <span style="color:var(--cyan);padding:0 8px;white-space:nowrap;">${denStr}</span>
+          </span>
+        </div>`;
       } else if (cleanLine.startsWith("u =") || cleanLine.startsWith("λ =")) {
         html += `<div style="background:rgba(182,154,255,0.15);border:1px solid var(--purple);color:var(--text-white);border-radius:9px;padding:8px 12px;font-weight:800;font-family:monospace;font-size:13.5px;margin:5px 0;">${cleanLine}</div>`;
       } else {
@@ -3038,7 +3055,277 @@ document.getElementById("btnOpenHistory").onclick = () => {
     `<button class="small-btn" onclick="state.history=[];localStorage.removeItem('matrix_lab_history_v1');renderAll();closeModal()">🗑️ Очистить</button>
      <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
 };
+// ============================================================================
+// «ВХОД-ВЫХОД» W(s) <===> «ПРОСТРАНСТВО СОСТОЯНИЙ» (A, B, C, D) В ВЕБ-ВЕРСИИ
+// ============================================================================
+const tfDialogState = {
+  n: 3,
+  num: ["0", "0", "0", "1", "0", "0", "0", "0"], // от старшей степени s^n к s^0
+  den: ["1", "6", "11", "6", "0", "0", "0", "0"],
+  autoLoad: true
+};
 
+function formatPolyS(coeffs, vName = "s") {
+  const d = coeffs.length - 1;
+  const terms = [];
+  coeffs.forEach((v, i) => {
+    const p = d - i;
+    if (Math.abs(v) < 1e-8) return;
+    const absStr = formatSymbolic(Math.abs(v));
+    const sign = v < 0 && terms.length ? " − " : v < 0 ? "−" : terms.length ? " + " : "";
+    const pStr = p === 0 ? "" : p === 1 ? vName : vName + toSuperscriptStr(p);
+    const cStr = p > 0 && absStr === "1" ? "" : (p > 0 && absStr.includes("/") ? `(${absStr})` : absStr);
+    terms.push(`${sign}${cStr}${pStr}`);
+  });
+  return terms.length ? terms.join("") : "0";
+}
+
+function formatDiffEq(den, num) {
+  const side = (arr, fn) => {
+    const d = arr.length - 1, t = [];
+    arr.forEach((v, i) => {
+      const ord = d - i;
+      if (Math.abs(v) < 1e-8) return;
+      const absStr = formatSymbolic(Math.abs(v));
+      const sign = v < 0 && t.length ? " − " : v < 0 ? "−" : t.length ? " + " : "";
+      const drv = ord === 0 ? fn : ord === 1 ? `${fn}'` : ord === 2 ? `${fn}''` : ord === 3 ? `${fn}'''` : `${fn}^(${ord})`;
+      const c = absStr === "1" ? "" : `${absStr}·`;
+      t.push(`${sign}${c}${drv}`);
+    });
+    return t.length ? t.join("") : "0";
+  };
+  return `${side(den, "y")} = ${side(num, "u")}`;
+}
+
+function openTfToSsModal() {
+  const n = tfDialogState.n;
+  let numBoxes = "", denBoxes = "";
+  for (let i = 0; i <= n; i++) {
+    const p = n - i;
+    const lbl = p === 0 ? "1" : p === 1 ? "s" : `s${toSuperscriptStr(p)}`;
+    numBoxes += `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+      <span style="font-size:10.5px;color:var(--text-dim);font-weight:700;">b_${p} (${lbl})</span>
+      <input type="text" class="matrix-cell" style="width:58px;height:40px;font-size:14px;border-color:rgba(112,225,161,0.55);"
+        value="${tfDialogState.num[i] ?? '0'}" oninput="tfDialogState.num[${i}]=this.value;updateTfPreview()" />
+    </div>`;
+    denBoxes += `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+      <span style="font-size:10.5px;color:var(--text-dim);font-weight:700;">a_${p} (${lbl})</span>
+      <input type="text" class="matrix-cell" style="width:58px;height:40px;font-size:14px;border-color:rgba(84,229,229,0.55);"
+        value="${tfDialogState.den[i] ?? '0'}" oninput="tfDialogState.den[${i}]=this.value;updateTfPreview()" />
+    </div>`;
+  }
+
+  const bodyHtml = `
+    <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 10px;">
+      Введите коэффициенты полиномов числителя B(s) и знаменателя A(s) от старшей степени к младшей:
+    </p>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span style="font-size:13.5px;font-weight:600;">Порядок знаменателя n:</span>
+      <div class="counter-wrap">
+        <button class="cnt-btn" ${n <= 1 ? "disabled" : ""} onclick="changeTfOrder(${n - 1})">−</button>
+        <span class="cnt-val" style="color:var(--cyan);">n = ${n}</span>
+        <button class="cnt-btn" ${n >= 7 ? "disabled" : ""} onclick="changeTfOrder(${n + 1})">+</button>
+      </div>
+    </div>
+    <div style="color:var(--emerald);font-weight:700;font-size:12.5px;margin-bottom:4px;">ЧИСЛИТЕЛЬ B(s) = bₙsⁿ + ... + b₁s + b₀:</div>
+    <div class="matrix-scroll" style="justify-content:flex-start;gap:6px;padding-bottom:8px;">${numBoxes}</div>
+    <div style="color:var(--cyan);font-weight:700;font-size:12.5px;margin:8px 0 4px;">ЗНАМЕНАТЕЛЬ A(s) = aₙsⁿ + ... + a₁s + a₀:</div>
+    <div class="matrix-scroll" style="justify-content:flex-start;gap:6px;padding-bottom:8px;">${denBoxes}</div>
+    <div id="tfLivePreviewBox" style="margin-top:8px;"></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;cursor:pointer;">
+      <input type="checkbox" ${tfDialogState.autoLoad ? "checked" : ""} onchange="tfDialogState.autoLoad=this.checked" />
+      Загрузить полученные матрицы A, B, C на главный экран
+    </label>
+  `;
+  const footHtml = `
+    <button class="small-btn" onclick="closeModal()">Отмена</button>
+    <button class="op-btn" style="height:36px;flex:0 0 140px;" onclick="runTfToSsCalc()">Преобразовать</button>
+  `;
+  openModal("Вход–Выход W(s) ➔ (A, B, C)", bodyHtml, footHtml);
+  updateTfPreview();
+}
+
+function changeTfOrder(newN) {
+  const oldN = tfDialogState.n;
+  if (newN > oldN) {
+    tfDialogState.num.unshift("0");
+    tfDialogState.den.unshift("1");
+  } else if (newN < oldN) {
+    tfDialogState.num.shift();
+    tfDialogState.den.shift();
+  }
+  tfDialogState.n = newN;
+  openTfToSsModal();
+}
+
+function updateTfPreview() {
+  const box = document.getElementById("tfLivePreviewBox");
+  if (!box) return;
+  const n = tfDialogState.n;
+  const num = Array.from({ length: n + 1 }, (_, i) => parseSmartCell(tfDialogState.num[i]));
+  const den = Array.from({ length: n + 1 }, (_, i) => parseSmartCell(tfDialogState.den[i]));
+  box.innerHTML = `<div style="background:#0B1322;border:1px solid rgba(182,154,255,0.45);border-radius:10px;padding:10px;text-align:center;">
+    <div style="font-size:10.5px;color:var(--text-dim);margin-bottom:4px;">Предпросмотр передаточной функции W(s):</div>
+    <div style="color:var(--emerald);font-weight:800;font-family:monospace;font-size:13px;">${formatPolyS(num)}</div>
+    <div style="width:85%;height:1.3px;background:var(--cyan);margin:4px auto;"></div>
+    <div style="color:var(--cyan);font-weight:800;font-family:monospace;font-size:13px;">${formatPolyS(den)}</div>
+  </div>`;
+}
+
+function runTfToSsCalc() {
+  try {
+    const nIn = tfDialogState.n;
+    const rawNumIn = Array.from({ length: nIn + 1 }, (_, i) => parseSmartCell(tfDialogState.num[i]));
+    const rawDenIn = Array.from({ length: nIn + 1 }, (_, i) => parseSmartCell(tfDialogState.den[i]));
+
+    const firstDen = rawDenIn.findIndex(v => Math.abs(v) > 1e-10);
+    if (firstDen === -1) throw new Error("Знаменатель A(s) не может быть равен нулю!");
+    const rawDen = rawDenIn.slice(firstDen);
+    const n = rawDen.length - 1;
+    if (n < 1 || n > 7) throw new Error("Степень знаменателя n должна быть от 1 до 7");
+
+    const firstNum = rawNumIn.findIndex(v => Math.abs(v) > 1e-10);
+    const rawNum = firstNum === -1 ? [0] : rawNumIn.slice(firstNum);
+    const m = rawNum.length - 1;
+    if (m > n) throw new Error(`Степень числителя (m = ${m}) не должна превышать степень знаменателя (n = ${n})!`);
+
+    const an = rawDen[0];
+    const monicDen = rawDen.map(v => v / an);
+    const paddedNum = Array.from({ length: n + 1 }, (_, i) => {
+      const off = (n + 1) - rawNum.length;
+      return i >= off ? rawNum[i - off] / an : 0.0;
+    });
+
+    const aAsc = Array.from({ length: n }, (_, k) => monicDen[n - k]);
+    const bAsc = Array.from({ length: n + 1 }, (_, k) => paddedNum[n - k]);
+    const dVal = bAsc[n];
+    const betaAsc = Array.from({ length: n }, (_, k) => bAsc[k] - aAsc[k] * dVal);
+
+    const aCtrl = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => (i < n - 1 ? (j === i + 1 ? 1 : 0) : (Math.abs(aAsc[j]) < 1e-12 ? 0 : -aAsc[j])))
+    );
+    const bCtrl = Array.from({ length: n }, (_, i) => [i === n - 1 ? 1 : 0]);
+    const cCtrl = [Array.from({ length: n }, (_, j) => (Math.abs(betaAsc[j]) < 1e-12 ? 0 : betaAsc[j]))];
+
+    const aObs = math.transpose(aCtrl), bObs = math.transpose(cCtrl), cObs = math.transpose(bCtrl);
+    const poles = math.eigenvalues(aCtrl);
+    const isStable = poles.every(p => p.re < -1e-7);
+
+    const lines = [];
+    lines.push("ПРЕОБРАЗОВАНИЕ «ВХОД–ВЫХОД» ➔ «ПРОСТРАНСТВО СОСТОЯНИЙ»:");
+    lines.push("Исходная передаточная функция (коэффициент передачи):");
+    lines.push(`W(s) = [ПФ: ${formatPolyS(rawNum)} /// ${formatPolyS(rawDen)}]`);
+    if (Math.abs(an - 1) > 1e-7) {
+      lines.push(`После нормировки на старший коэффициент a_${n} = ${formatSymbolic(an)}:`);
+      lines.push(`W(s) = [ПФ: ${formatPolyS(paddedNum)} /// ${formatPolyS(monicDen)}]`);
+    }
+    lines.push(`\nДифференциальное уравнение «вход–выход»:\n${formatDiffEq(monicDen, paddedNum)}`);
+    lines.push(`Порядок системы: n = ${n}, степень числителя: m = ${m}`);
+    if (Math.abs(dVal) > 1e-8) lines.push(`Выделена прямая связь (при m = n): D = ${formatSymbolic(dVal)}`);
+    lines.push("════════════════════════════════");
+    lines.push("1) УПРАВЛЯЕМАЯ КАНОНИЧЕСКАЯ ФОРМА (ФРОБЕНИУСА):");
+    lines.push(`Матрица состояния A_c (${n}×${n}) [блоки: упр=${n}, неупр=0]:\n` + formatMatrixAligned(aCtrl));
+    lines.push(`Матрица входа B_c (${n}×1) [стр: упр=${n}, неупр=0]:\n` + formatMatrixAligned(bCtrl));
+    lines.push(`Матрица выхода C_c (1×${n}):\n` + formatMatrixAligned(cCtrl));
+    if (Math.abs(dVal) > 1e-8) lines.push(`Коэффициент прямой передачи D = [ ${formatSymbolic(dVal)} ]`);
+    lines.push("════════════════════════════════");
+    lines.push("2) НАБЛЮДАЕМАЯ КАНОНИЧЕСКАЯ ФОРМА (ДВОЙСТВЕННАЯ):");
+    lines.push(`Матрица состояния A_o = A_cᵀ (${n}×${n}):\n` + formatMatrixAligned(aObs));
+    lines.push(`Матрица входа B_o = C_cᵀ (${n}×1):\n` + formatMatrixAligned(bObs));
+    lines.push(`Матрица выхода C_o = B_cᵀ (1×${n}):\n` + formatMatrixAligned(cObs));
+    lines.push("════════════════════════════════");
+    lines.push("ПОЛЮСА ПЕРЕДАТОЧНОЙ ФУНКЦИИ (корни A(s) = 0):");
+    lines.push(`λ = { ${poles.map((c, i) => `λ${i + 1} = ${c}`).join(", ")} }`);
+    lines.push(isStable
+      ? "✅ Все полюса в левой полуплоскости (Re λ < 0) ➔ система УСТОЙЧИВА."
+      : "⚠️ Есть полюса с Re λ ≥ 0 ➔ система НЕУСТОЙЧИВА.");
+
+    if (tfDialogState.autoLoad) {
+      if (n >= 2) { state.tauN = n; state.tauM = 1; state.tauK = 1; }
+      state.algDim[0] = { r: n, c: n };
+      state.algDim[1] = { r: n, c: 1 };
+      state.algDim[2] = { r: 1, c: n };
+      for (let i = 0; i < n; i++) {
+        state.matrices[1][i][0] = formatNumber(bCtrl[i][0], 5);
+        state.matrices[2][0][i] = formatNumber(cCtrl[0][i], 5);
+        for (let j = 0; j < n; j++) state.matrices[0][i][j] = formatNumber(aCtrl[i][j], 5);
+      }
+      renderAll();
+    }
+
+    closeModal();
+    showTextResult("Вход–Выход W(s) ➔ Пространство состояний", lines.join("\n"), aCtrl);
+  } catch (e) {
+    showToast(e.message || "Ошибка преобразования W(s)");
+  }
+}
+
+function runSsToTfCalc() {
+  try {
+    const matA = getParsedMatrix(0);
+    const cleanB = math.trimZeroColsB(getParsedMatrix(1));
+    const cleanC = math.trimZeroRowsC(getParsedMatrix(2));
+    const n = matA.length;
+
+    const fMats = [];
+    const pCoeffs = new Array(n).fill(0);
+    let fCur = math.identityMatrix(n);
+
+    for (let k = 1; k <= n; k++) {
+      fMats.push(fCur);
+      const af = math.multiply(matA, fCur);
+      const tr = af.reduce((s, r, idx) => s + r[idx], 0);
+      const pk = -tr / k;
+      pCoeffs[k - 1] = Math.abs(pk) < 1e-9 ? 0 : (Math.abs(pk - Math.round(pk)) < 1e-6 ? Math.round(pk) : pk);
+      if (k < n) {
+        fCur = af.map((r, ri) => r.map((v, ci) => {
+          const val = v + (ri === ci ? pCoeffs[k - 1] : 0);
+          return Math.abs(val) < 1e-9 ? 0 : (Math.abs(val - Math.round(val)) < 1e-6 ? Math.round(val) : val);
+        }));
+      }
+    }
+
+    const denCoeffs = [1.0, ...pCoeffs];
+    const bCol = cleanB.map(r => [r[0]]);
+    const cRow = [cleanC[0]];
+    const numCoeffs = fMats.map(f => {
+      const v = math.multiply(math.multiply(cRow, f), bCol)[0][0];
+      return Math.abs(v) < 1e-8 ? 0 : (Math.abs(v - Math.round(v)) < 1e-6 ? Math.round(v) : v);
+    });
+
+    // Синхронизируем с диалогом W(s) -> (A,B,C)
+    tfDialogState.n = n;
+    tfDialogState.den = denCoeffs.map(v => formatNumber(v, 5));
+    tfDialogState.num = ["0", ...numCoeffs.map(v => formatNumber(v, 5))];
+
+    const lines = [];
+    lines.push("ПРЕОБРАЗОВАНИЕ «ПРОСТРАНСТВО СОСТОЯНИЙ» ➔ «ВХОД–ВЫХОД»:");
+    lines.push("Формула коэффициента передачи: W(s) = C·(sI − A)⁻¹·B = B(s) / A(s)");
+    lines.push("════════════════════════════════");
+    lines.push("1) ЗНАМЕНАТЕЛЬ A(s) = det(sI − A) (по методу Фаддеева — Леверье):");
+    lines.push(`Коэффициенты: [ ${denCoeffs.map(formatSymbolic).join(", ")} ]`);
+    lines.push(`A(s) = ${formatPolyS(denCoeffs)}`);
+    lines.push("════════════════════════════════");
+    lines.push("2) ЧИСЛИТЕЛЬ B(s) = C·adj(sI − A)·B:");
+    for (let k = 1; k <= n; k++) {
+      const pwr = n - k;
+      const sTag = pwr === 0 ? "1" : pwr === 1 ? "s" : `s${toSuperscriptStr(pwr)}`;
+      lines.push(`• При ${sTag}: C·F_${k}·B = ${formatSymbolic(numCoeffs[k - 1])}`);
+    }
+    lines.push(`Коэффициенты числителя: [ ${numCoeffs.map(formatSymbolic).join(", ")} ]`);
+    lines.push(`B(s) = ${formatPolyS(numCoeffs)}`);
+    lines.push("════════════════════════════════");
+    lines.push("3) ИТОГОВЫЙ КОЭФФИЦИЕНТ ПЕРЕДАЧИ W(s):");
+    lines.push(`W(s) = [ПФ: ${formatPolyS(numCoeffs)} /// ${formatPolyS(denCoeffs)}]`);
+    lines.push("════════════════════════════════");
+    lines.push("4) ДИФФЕРЕНЦИАЛЬНОЕ УРАВНЕНИЕ «ВХОД–ВЫХОД»:");
+    lines.push(formatDiffEq(denCoeffs, numCoeffs));
+
+    showTextResult("Коэффициент передачи W(s) из (A, B, C)", lines.join("\n"));
+  } catch (e) {
+    showToast(e.message || "Ошибка вычисления W(s)");
+  }
+}
 renderAll();
 </script>
 </body>
