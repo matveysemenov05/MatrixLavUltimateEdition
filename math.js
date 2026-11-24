@@ -1199,8 +1199,11 @@ class MatrixMath {
             return new Complex(nextNeg--, 0);
           }
           if (orig.re < -1e-5) return orig;
-          if (Math.abs(orig.im) < 1e-5 && orig.re > 1e-5 && !usedReals.some(r => Math.abs(r + orig.re) < 1e-4)) {
-            usedReals.push(-orig.re); return new Complex(-orig.re, 0);
+          // Зеркалим λ -> -λ только для ЦЕЛЫХ корней (например, 3 -> -3 в Конспекте 2)
+          if (Math.abs(orig.im) < 1e-5 && orig.re > 1e-5 && Math.abs(orig.re - Math.round(orig.re)) < 1e-4 && !usedReals.some(r => Math.abs(r + orig.re) < 1e-4)) {
+            const mir = -Math.round(orig.re);
+            usedReals.push(mir);
+            return new Complex(mir, 0);
           }
           while (usedReals.some(r => Math.abs(r - nextNeg) < 1e-4) && Math.abs(orig.im) < 1e-5) nextNeg -= 1;
           usedReals.push(nextNeg);
