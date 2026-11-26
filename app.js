@@ -261,12 +261,7 @@ function setDims(idx, newR, newC) {
   renderAll();
 }
 
-function saveHistory(title, text, mat = null) {
-  state.history.unshift({ id: Date.now(), title, text, mat: mat ? mat.map(r => [...r]) : null, time: new Date().toLocaleTimeString() });
-  if (state.history.length > 150) state.history.pop();
-  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
-  document.getElementById("historyCount").textContent = state.history.length;
-}
+
 
 function showMatrixResult(mat, title) {
   if (!mat || mat.some(r => r.some(v => !Number.isFinite(v)))) {
@@ -1417,18 +1412,83 @@ function copyEmbeddedMat(idx) {
 function openExportChoiceModal() {
   openModal(
     "Экспорт и отправка решения",
-    `<p style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px;">Выберите формат документа:</p>
-     <div style="display:flex;flex-direction:column;gap:8px;">
-       <button class="op-btn" style="height:42px;" onclick="closeModal();exportWebPdfPrint()">📕 Сохранить / Печать PDF с формулами (LaTeX-стиль)</button>
-       <button class="op-btn purple" style="height:42px;" onclick="closeModal();copyWebLatex()">📐 Скопировать код LaTeX (\\begin{bmatrix})</button>
-       <button class="op-btn" style="height:42px;background:#1E293B;border-color:#334155;color:#fff;" onclick="closeModal();shareCurrentResult()">📄 Поделиться / Скопировать как текст</button>
+    `<p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">Выберите формат документа (в начало автоматически добавится условие «Дано»):</p>
+     <div style="display:flex;flex-direction:column;gap:10px;">
+       <button class="op-btn" style="flex:none;width:100%;min-height:52px;padding:12px 16px;font-size:13.5px;border-radius:12px;" onclick="closeModal();exportWebPdfPrint()">
+         📕 Сохранить / Печать PDF с формулами (LaTeX-стиль)
+       </button>
+       <button class="op-btn purple" style="flex:none;width:100%;min-height:52px;padding:12px 16px;font-size:13.5px;border-radius:12px;" onclick="closeModal();copyWebLatex()">
+         📐 Скопировать код LaTeX (\\begin{bmatrix})
+       </button>
+       <button class="op-btn" style="flex:none;width:100%;min-height:52px;padding:12px 16px;font-size:13.5px;border-radius:12px;" onclick="closeModal();shareCurrentResult()">
+         📄 Поделиться / Скопировать как текст
+       </button>
      </div>`,
-    `<button class="small-btn" onclick="closeModal()">Закрыть</button>`
+    `<button class="small-btn" style="padding:7px 14px;font-size:12px;" onclick="closeModal()">Закрыть</button>`
   );
 }
 
+// Формирует блок "ИСХОДНЫЕ ДАННЫЕ (ДАНО)" с исходными матрицами A, B, C для любой функции
+function buildGivenMatricesHeader(title) {
+  const t = String(title || "");
+  const mA = getParsedMatrix(0), mB = getParsedMatrix(1), mC = getParsedMatrix(2);
+  const hasNonZero = (m) => m && m.some(r => r.some(v => Math.abs(v) > 1e-12));
+
+  let useA = true, useB = false, useC = false;
+  if (/\(B\)| B⁻¹| Bᵀ|det\(B\)|rank\(B\)|Tr\(B\)|‖B‖|× B$/.test(t)) {
+    useA = false; useB = true;
+  } else if (/\(C\)| C⁻¹| Cᵀ|det\(C\)|rank\(C\)|Tr\(C\)|‖C‖|× C$/.test(t)) {
+    useA = false; useC = true;
+  } else if (/A \+ B \+ C|A − B − C|A × B × C/.test(t)) {
+    useA = true; useB = true; useC = true;
+  } else if (/Блок-схема|Калман|W\(s\)/.test(t)) {
+    useA = true;
+    useB = hasNonZero(mB);
+    useC = hasNonZero(mC);
+  } else if (/Управляемост|Фробениус|Модальное|Регулятор|LQR|СЛАУ|A \+ B|A − B|A × B|a · b|a ⨯ b/.test(t)) {
+    useA = true; useB = true;
+  } else if (/Наблюдаемост|Наблюдатель/.test(t)) {
+    useA = true; useC = true;
+  } else if (/Формула/.test(t)) {
+    useA = /A/i.test(t);
+    useB = /B/i.test(t);
+    useC = /C/i.test(t);
+    if (!useA && !useB && !useC) useA = true;
+  }
+
+  const lines = ["ИСХОДНЫЕ ДАННЫЕ (ДАНО):"];
+  if (useA) {
+    lines.push(`Матрица A (${mA.length}×${mA[0].length}):`);
+    lines.push(formatMatrixAligned(mA, state.symbolicMode));
+  }
+  if (useB) {
+    const cleanB = state.mainTab === 1 ? math.trimZeroColsB(mB) : mB;
+    lines.push(`Матрица B (${cleanB.length}×${cleanB[0].length}):`);
+    lines.push(formatMatrixAligned(cleanB, state.symbolicMode));
+  }
+  if (useC) {
+    const cleanC = state.mainTab === 1 ? math.trimZeroRowsC(mC) : mC;
+    lines.push(`Матрица C (${cleanC.length}×${cleanC[0].length}):`);
+    lines.push(formatMatrixAligned(cleanC, state.symbolicMode));
+  }
+  lines.push("════════════════════════════════");
+  lines.push(`РЕШЕНИЕ (${prettifyWebMath(title)}):`);
+  return lines.join("\n");
+}
+
+function getFullDocumentTextWithGiven() {
+  const givenBlock = buildGivenMatricesHeader(state.resTitle);
+  let bodyTxt = state.resText || "";
+  if (state.resGrid) {
+    bodyTxt += (bodyTxt ? "\n" : "") + state.resGrid.map(r => `[ ${r.join("  ")} ]`).join("\n");
+  } else if (state.resMatrix && !bodyTxt.includes("⎡") && !bodyTxt.includes("│")) {
+    bodyTxt += (bodyTxt ? "\n" : "") + formatMatrixAligned(state.resMatrix, state.symbolicMode);
+  }
+  return `${givenBlock}\n${bodyTxt}`;
+}
+
 function shareCurrentResult() {
-  const cleanTxt = prettifyWebMath(state.resText || (state.resMatrix ? formatMatrixAligned(state.resMatrix, state.symbolicMode) : ""))
+  const cleanTxt = prettifyWebMath(getFullDocumentTextWithGiven())
     .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "")
     .replace(/\[ПФ:\s*([^/]+?)\s*\/\/\/\s*([^\]]+?)\]/g, "($1) / ($2)");
   const full = `${prettifyWebMath(state.resTitle)}\n\n${cleanTxt}`;
@@ -1436,19 +1496,23 @@ function shareCurrentResult() {
     navigator.share({ title: state.resTitle, text: full }).catch(() => {});
   } else {
     navigator.clipboard?.writeText(full);
-    showToast("Решение скопировано!");
+    showToast("Решение с условием скопировано!");
   }
 }
 
 function copyWebLatex() {
-  const raw = prettifyWebMath(state.resText || (state.resMatrix ? formatMatrixAligned(state.resMatrix, true) : ""))
+  const raw = prettifyWebMath(getFullDocumentTextWithGiven())
     .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "");
   const lines = raw.split(/\r?\n/);
   const isMat = (s) => {
     const t = s.trim();
-    return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") || (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
+    return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
+      (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
   };
-  const out = [`% Сгенерировано в MATRIX LAB PRO`, `\\section*{${prettifyWebMath(state.resTitle)}}`];
+  const out = [
+    `% Сгенерировано в MATRIX LAB PRO`,
+    `\\section*{${prettifyWebMath(state.resTitle)}}`
+  ];
   let i = 0;
   while (i < lines.length) {
     const l = lines[i].trim();
@@ -1458,7 +1522,15 @@ function copyWebLatex() {
       const rows = [];
       while (i < lines.length && isMat(lines[i])) {
         const cl = lines[i].trim().replace(/^[⎡⎢⎣│\[]+/, '').replace(/[⎤⎥⎦│\]]+$/, '').trim();
-        rows.push("  " + cl.split(/\s+/).join(" & "));
+        const cells = cl.split(/\s+/).map(c => {
+          if (c.includes("/")) {
+            const [n, d] = c.split("/");
+            const sgn = (n.startsWith("-") || n.startsWith("−")) ? "-" : "";
+            return `${sgn}\\frac{${n.replace(/^[-−]/, "")}}{${d}}`;
+          }
+          return c;
+        });
+        rows.push("  " + cells.join(" & "));
         i++;
       }
       out.push(rows.join(" \\\\\n"));
@@ -1469,37 +1541,44 @@ function copyWebLatex() {
       const pref = l.split("[ПФ:")[0].trim();
       const [num, den] = l.split("[ПФ:")[1].replace(/\]$/, "").split("///").map(s => s.trim());
       out.push(`\\[ ${pref} \\frac{${num}}{${den}} \\]`);
-    } else if (!l.startsWith("══") && !l.startsWith("──")) {
+    } else if (l.startsWith("══") || l.startsWith("──")) {
+      out.push(`\\bigskip\\hrule\\bigskip`);
+    } else if (l === "ИСХОДНЫЕ ДАННЫЕ (ДАНО):" || l.startsWith("РЕШЕНИЕ (")) {
+      out.push(`\\subsection*{${l}}`);
+    } else {
       out.push(`\\noindent ${l}\\\\[4pt]`);
     }
     i++;
   }
   navigator.clipboard?.writeText(out.join("\n"));
-  showToast("Код LaTeX скопирован!");
+  showToast("Код LaTeX (с матрицами условия Дано) скопирован!");
 }
 
 function exportWebPdfPrint() {
-  const resEl = document.querySelector(".result-card");
-  if (!resEl) return;
+  const fullDocHtml = _baseParseRichSectionHtml(getFullDocumentTextWithGiven(), state.symbolicMode, state.resTitle.includes("Экспонента"));
   const win = window.open("", "_blank");
   if (!win) return showToast("Разрешите всплывающие окна для сохранения PDF");
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${prettifyWebMath(state.resTitle)}</title>
     <style>
-      body { font-family: "Cambria Math", "Times New Roman", Georgia, serif; color: #0F172A; padding: 28px; max-width: 820px; margin: 0 auto; }
+      body { font-family: "Cambria Math", "Times New Roman", Georgia, serif; color: #0F172A; padding: 28px; max-width: 820px; margin: 0 auto; background: #fff; }
       h2 { border-bottom: 2px solid #0F172A; padding-bottom: 8px; margin-bottom: 16px; }
       .res-top, .quick-row, .q-chip { display: none !important; }
+      div[style*="#0C1424"] { background: #F8FAFC !important; border: 1px solid #CBD5E1 !important; color: #0F172A !important; }
+      div[style*="var(--text-white)"] { color: #0F172A !important; }
+      div[style*="var(--cyan)"] { color: #0369A1 !important; }
+      div[style*="var(--amber)"] { color: #B45309 !important; font-weight: bold !important; }
       .matrix-scroll { display: flex; justify-content: flex-start; margin: 8px 0; }
       .matrix-bracket-wrap { display: inline-flex; align-items: stretch; border-left: 2px solid #0F172A; border-right: 2px solid #0F172A; border-radius: 4px; padding: 4px 8px; }
       .bracket-line { display: none; }
       .matrix-grid { display: flex; flex-direction: column; gap: 4px; }
       .matrix-grid-row { display: flex; gap: 8px; }
-      .res-grid-cell { min-width: 64px; padding: 4px 8px; text-align: center; font-weight: bold; font-size: 14px; border: 1px solid #CBD5E1; border-radius: 6px; }
+      .res-grid-cell { min-width: 64px; padding: 4px 8px; text-align: center; font-weight: bold; font-size: 14px; border: 1px solid #CBD5E1; border-radius: 6px; color: #0F172A !important; background: #fff !important; }
       .frac-box { display: inline-flex; align-items: center; gap: 2px; }
-      .frac-col { display: inline-flex; flex-direction: column; align-items: center; font-size: 11px; line-height: 1.1; }
+      .frac-col { display: inline-flex; flex-direction: column; align-items: center; font-size: 11px; line-height: 1.1; color: #0F172A !important; }
       .frac-bar { width: 100%; height: 1.2px; background: #0F172A; margin: 1px 0; }
     </style></head><body>
     <h2>MATRIX LAB PRO — ${prettifyWebMath(state.resTitle)}</h2>
-    ${resEl.innerHTML}
+    ${fullDocHtml}
     <script>window.onload = () => { setTimeout(() => { window.print(); }, 250); };<\/script>
   </body></html>`);
   win.document.close();
@@ -1554,18 +1633,7 @@ function cleanHistoryText(raw) {
     .replace(/\[ПФ:\s*([^/]+?)\s*\/\/\/\s*([^\]]+?)\]/g, "($1) / ($2)");
 }
 
-function restoreHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  state.resTitle = h.title;
-  state.resText = h.text;
-  state.resMatrix = h.mat;
-  state.resGrid = null;
-  state.isError = false;
-  closeModal();
-  renderResultCard();
-  showToast("Загружено из истории!");
-}
+
 
 function copyHistoryItem(idx) {
   const h = state.history[idx];
@@ -1609,6 +1677,881 @@ document.getElementById("btnOpenHistory").onclick = () => {
   openModal("История вычислений", html,
     `<button class="small-btn" onclick="state.history=[];localStorage.removeItem('matrix_lab_history_v1');renderAll();closeModal()">🗑️ Очистить</button>
      <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
+};
+
+renderAll();
+
+// ============================================================================
+// МОДУЛЬ УДОБСТВА (АВТОСОХРАНЕНИЕ, UNDO, РЕЖИМ "ВСЕ 3 МАТРИЦЫ", СТРЕЛКИ, ЗАКЛАДКИ ОТЧЁТА)
+// ============================================================================
+state.showAllThree = false;
+state.activeReportSection = -1; // -1 = показывать все шаги отчёта
+const undoStack = [];
+
+// 1. АВТОСОХРАНЕНИЕ И ЗАГРУЗКА МАТРИЦ A, B, C ПРИ ПЕРЕЗАГРУЗКЕ СТРАНИЦЫ
+const STATE_STORAGE_KEY = "matrix_lab_saved_state_v2";
+
+function saveMatricesToStorage() {
+  try {
+    const payload = {
+      mainTab: state.mainTab,
+      selTab: state.selTab,
+      algDim: state.algDim,
+      tauN: state.tauN,
+      tauM: state.tauM,
+      tauK: state.tauK,
+      matrices: state.matrices,
+      scalarK: state.scalarK,
+      showAllThree: state.showAllThree
+    };
+    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_) {}
+}
+
+function loadMatricesFromStorage() {
+  try {
+    const raw = localStorage.getItem(STATE_STORAGE_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (p && Array.isArray(p.matrices) && p.matrices.length === 3) {
+      state.mainTab = p.mainTab ?? 0;
+      state.selTab = p.selTab ?? 0;
+      if (Array.isArray(p.algDim)) state.algDim = p.algDim;
+      if (p.tauN) state.tauN = p.tauN;
+      if (p.tauM) state.tauM = p.tauM;
+      if (p.tauK) state.tauK = p.tauK;
+      state.matrices = p.matrices;
+      if (p.scalarK) state.scalarK = p.scalarK;
+      state.showAllThree = Boolean(p.showAllThree);
+    }
+  } catch (_) {}
+}
+
+// 2. СТЕК ОТМЕНЫ (UNDO) И ОЧИСТКА ВСЕХ 3 МАТРИЦ
+const redoStack = [];
+
+function getSnapshot() {
+  return {
+    algDim: state.algDim.map(d => ({ ...d })),
+    tauN: state.tauN,
+    tauM: state.tauM,
+    tauK: state.tauK,
+    matrices: state.matrices.map(m => m.map(r => [...r]))
+  };
+}
+
+function applySnapshot(snap) {
+  state.algDim = snap.algDim;
+  state.tauN = snap.tauN;
+  state.tauM = snap.tauM;
+  state.tauK = snap.tauK;
+  state.matrices = snap.matrices;
+  saveMatricesToStorage();
+  renderAll();
+}
+
+function pushUndoState() {
+  undoStack.push(getSnapshot());
+  if (undoStack.length > 30) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function popUndoState() {
+  if (!undoStack.length) {
+    showToast("Нет действий для отмены");
+    return;
+  }
+  redoStack.push(getSnapshot());
+  applySnapshot(undoStack.pop());
+  showToast("↩️ Отменено (шаг назад)");
+}
+
+function popRedoState() {
+  if (!redoStack.length) {
+    showToast("Нет действий для возврата вперёд");
+    return;
+  }
+  undoStack.push(getSnapshot());
+  applySnapshot(redoStack.pop());
+  showToast("↪️ Возвращено (шаг вперёд)");
+}
+
+function clearAllThreeMatrices() {
+  pushUndoState();
+  for (let t = 0; t < 3; t++) {
+    for (let i = 0; i < 7; i++) {
+      for (let j = 0; j < 7; j++) state.matrices[t][i][j] = "0";
+    }
+  }
+  saveMatricesToStorage();
+  renderAll();
+  showToast("🧹 Все матрицы (A, B, C) очищены!");
+}
+
+// 3. ДОБАВЛЯЕМ КНОПКИ "👁 Все 3", "↩️" И "🧹 Все=0" В ПАНЕЛЬ ИНСТРУМЕНТОВ
+(function injectConvenienceButtons() {
+  const tabsBar = document.querySelector(".matrix-tabs");
+  if (tabsBar && !document.getElementById("chipShowAll3")) {
+    const btnAll3 = document.createElement("button");
+    btnAll3.id = "chipShowAll3";
+    btnAll3.className = "mat-chip";
+    btnAll3.style.flex = "0.85";
+    btnAll3.textContent = "👁 Все 3";
+    btnAll3.onclick = () => {
+      state.showAllThree = !state.showAllThree;
+      saveMatricesToStorage();
+      renderAll();
+    };
+    tabsBar.appendChild(btnAll3);
+  }
+
+  const clearBtn = document.getElementById("btnClearMat");
+  if (clearBtn && clearBtn.parentElement && !document.getElementById("rowUndoRedo")) {
+    const firstRow = clearBtn.parentElement;
+    // Оставляем в первом ряду ровно 4 широкие кнопки (Рандом, Единич., Копир., Встав.)
+    clearBtn.style.display = "none";
+
+    // Создаём второй просторный ряд из 4 кнопок: ↩️ Назад | ↪️ Вперёд | ✕ Сброс | 🧹 Все = 0
+    const secondRow = document.createElement("div");
+    secondRow.id = "rowUndoRedo";
+    secondRow.className = "quick-row";
+    secondRow.innerHTML = `
+      <button class="q-chip q-cyan" onclick="popUndoState()">↩️ Назад</button>
+      <button class="q-chip q-cyan" onclick="popRedoState()">↪️ Вперёд</button>
+      <button class="q-chip q-danger" style="flex:1;" onclick="document.getElementById('btnClearMat').click()">✕ Сброс</button>
+      <button class="q-chip q-danger" style="flex:1;" onclick="clearAllThreeMatrices()">🧹 Все = 0</button>
+    `;
+    firstRow.parentElement.insertBefore(secondRow, firstRow.nextSibling);
+  }
+})();
+
+// Перехватываем кнопки Рандом, Единичная, Сброс и Перенос для записи в Undo и Автосохранения
+document.getElementById("btnRandom").onclick = () => {
+  pushUndoState();
+  const targets = state.showAllThree ? [0, 1, 2] : [state.selTab];
+  for (const t of targets) {
+    const { r, c } = getDims(t);
+    for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) {
+      state.matrices[t][i][j] = String(Math.floor(Math.random() * 19) - 9);
+    }
+  }
+  saveMatricesToStorage();
+  renderGridInput();
+};
+
+document.getElementById("btnIdentity").onclick = () => {
+  pushUndoState();
+  const { r, c } = getDims();
+  for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) {
+    state.matrices[state.selTab][i][j] = i === j ? "1" : "0";
+  }
+  saveMatricesToStorage();
+  renderGridInput();
+};
+
+document.getElementById("btnClearMat").onclick = () => {
+  pushUndoState();
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) {
+    state.matrices[state.selTab][i][j] = "0";
+  }
+  saveMatricesToStorage();
+  renderGridInput();
+};
+
+const _baseTransferToTarget = transferToTarget;
+transferToTarget = function(targetIdx, mat) {
+  pushUndoState();
+  _baseTransferToTarget(targetIdx, mat);
+  saveMatricesToStorage();
+};
+
+const _baseSwapMatrices = swapMatrices;
+swapMatrices = function(i1, i2) {
+  pushUndoState();
+  _baseSwapMatrices(i1, i2);
+  saveMatricesToStorage();
+};
+
+// 4. УЛУЧШЕННАЯ СЕТКА ВВОДА: АВТОВЫДЕЛЕНИЕ ПРИ КЛИКЕ, СТРЕЛКИ/ENTER И РЕЖИМ "👁 ВСЕ 3 МАТРИЦЫ"
+renderGridInput = function() {
+  const grid = document.getElementById("matrixGridInput");
+  const bLeft = document.getElementById("bracketLeft");
+  const bRight = document.getElementById("bracketRight");
+  const btnAll3 = document.getElementById("chipShowAll3");
+  if (btnAll3) {
+    btnAll3.className = "mat-chip" + (state.showAllThree ? " sel-A" : "");
+  }
+
+  grid.innerHTML = "";
+  const names = ["A", "B", "C"];
+  const colors = ["var(--cyan)", "var(--purple)", "var(--amber)"];
+
+  function createSingleMatrixDom(tabIdx, showHeader) {
+    const { r, c } = getDims(tabIdx);
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.alignItems = "center";
+    if (showHeader) {
+      wrap.style.marginBottom = "10px";
+      const hdr = document.createElement("div");
+      hdr.style.color = colors[tabIdx];
+      hdr.style.fontWeight = "800";
+      hdr.style.fontSize = "12.5px";
+      hdr.style.marginBottom = "4px";
+      hdr.textContent = `Матрица ${names[tabIdx]} (${r}×${c})`;
+      wrap.appendChild(hdr);
+    }
+
+    const bWrap = document.createElement("div");
+    bWrap.className = "matrix-bracket-wrap";
+    const leftBar = document.createElement("div");
+    leftBar.className = "bracket-line";
+    leftBar.style.background = colors[tabIdx];
+    const rightBar = document.createElement("div");
+    rightBar.className = "bracket-line";
+    rightBar.style.background = colors[tabIdx];
+
+    const mGrid = document.createElement("div");
+    mGrid.className = "matrix-grid";
+
+    for (let i = 0; i < r; i++) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "matrix-grid-row";
+      for (let j = 0; j < c; j++) {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.autocomplete = "off";
+        inp.className = "matrix-cell";
+        inp.id = `mcell_${tabIdx}_${i}_${j}`;
+        inp.value = state.matrices[tabIdx][i][j];
+
+        // Автовыделение числа при клике в ячейку (чтобы сразу печатать поверх старого числа!)
+        inp.onfocus = () => {
+          if (state.selTab !== tabIdx) {
+            state.selTab = tabIdx;
+            renderDimControls();
+          }
+          if (inp.value === "0") {
+            inp.value = "";
+          } else {
+            setTimeout(() => inp.select(), 0);
+          }
+        };
+        inp.onblur = () => {
+          if (inp.value.trim() === "") inp.value = "0";
+          state.matrices[tabIdx][i][j] = inp.value.trim();
+          saveMatricesToStorage();
+        };
+        inp.oninput = () => {
+          state.matrices[tabIdx][i][j] = inp.value;
+          saveMatricesToStorage();
+        };
+
+        // Навигация стрелками клавиатуры и клавишей Enter (как в Excel)
+        inp.onkeydown = (e) => {
+          let nr = i, nc = j;
+          if (e.key === "ArrowRight") nc++;
+          else if (e.key === "ArrowLeft") nc--;
+          else if (e.key === "ArrowDown") nr++;
+          else if (e.key === "ArrowUp") nr--;
+          else if (e.key === "Enter") {
+            e.preventDefault();
+            if (j + 1 < c) nc++;
+            else if (i + 1 < r) { nr++; nc = 0; }
+          } else return;
+
+          if ( (e.key.startsWith("Arrow") && (inp.selectionStart === 0 || inp.selectionStart === inp.value.length || e.key === "ArrowUp" || e.key === "ArrowDown")) || e.key === "Enter") {
+            const target = document.getElementById(`mcell_${tabIdx}_${nr}_${nc}`);
+            if (target) {
+              e.preventDefault();
+              target.focus();
+            }
+          }
+        };
+
+        rowEl.appendChild(inp);
+      }
+      mGrid.appendChild(rowEl);
+    }
+
+    if (showHeader) {
+      bWrap.appendChild(leftBar);
+      bWrap.appendChild(mGrid);
+      bWrap.appendChild(rightBar);
+      wrap.appendChild(bWrap);
+      return wrap;
+    }
+    return mGrid;
+  }
+
+  if (state.showAllThree) {
+    bLeft.style.display = "none";
+    bRight.style.display = "none";
+    for (let t = 0; t < 3; t++) {
+      grid.appendChild(createSingleMatrixDom(t, true));
+    }
+  } else {
+    bLeft.style.display = "block";
+    bRight.style.display = "block";
+    grid.appendChild(createSingleMatrixDom(state.selTab, false));
+  }
+  saveMatricesToStorage();
+};
+
+// 5. НАВИГАЦИОННЫЕ ЗАКЛАДКИ ПО ШАГАМ ДЛИННОГО ОТЧЁТА ([Все шаги] [1) Упр.] [2) Набл.] [3) Калман] [Регулятор])
+const _baseShowTextResult = showTextResult;
+showTextResult = function(title, text, mat = null, grid = null, err = false) {
+  state.activeReportSection = -1;
+  _baseShowTextResult(title, text, mat, grid, err);
+};
+
+const _baseParseRichSectionHtml = parseRichSectionHtml;
+parseRichSectionHtml = function(reportText, symbolic = false, isExpMode = false) {
+  const rawSections = prettifyWebMath(reportText).split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
+  if (rawSections.length <= 1) {
+    return _baseParseRichSectionHtml(reportText, symbolic, isExpMode);
+  }
+
+  const getShortTabTitle = (sec, idx) => {
+    const first = (sec.split(/\r?\n/)[0] || "").trim();
+    if (first.includes("ПРОСТРАНСТВЕ СОСТОЯНИЙ")) return "Система";
+    if (first.includes("УПРАВЛЯЕМОСТИ")) return "1) Упр.";
+    if (first.includes("НАБЛЮДАЕМОСТИ")) return "2) Набл.";
+    if (first.includes("РАЗЛОЖЕНИЕ КАЛМАНА") || first.includes("КАЛМАНА T")) return "3) Калман T";
+    if (first.includes("ИТОГОВЫЙ ВЫВОД")) return "Итог";
+    if (first.includes("РЕГУЛЯТОРА")) return "Регулятор K";
+    if (first.includes("НАБЛЮДАТЕЛЯ")) return "Наблюдатель L";
+    if (first.includes("ЗНАМЕНАТЕЛЬ")) return "1) Знам. A(s)";
+    if (first.includes("ЧИСЛИТЕЛЬ")) return "2) Числ. B(s)";
+    if (first.includes("КОЭФФИЦИЕНТ ПЕРЕДАЧИ")) return "3) Дробь W(s)";
+    if (first.includes("ГУРВИЦА")) return "2) Гурвиц";
+    return `Шаг ${idx + 1}`;
+  };
+
+  let navHtml = `<div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--border-col);">`;
+  const allActive = state.activeReportSection === -1;
+  navHtml += `<button class="small-btn ${allActive ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=-1;renderResultCard()">📑 Все шаги (${rawSections.length})</button>`;
+  rawSections.forEach((sec, idx) => {
+    const act = state.activeReportSection === idx;
+    navHtml += `<button class="small-btn ${act ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=${idx};renderResultCard()">${getShortTabTitle(sec, idx)}</button>`;
+  });
+  navHtml += `</div>`;
+
+  const filteredText = state.activeReportSection === -1
+    ? reportText
+    : rawSections[state.activeReportSection] || reportText;
+
+  return navHtml + _baseParseRichSectionHtml(filteredText, symbolic, isExpMode);
+};
+
+// Загружаем сохранённые матрицы при старте
+loadMatricesFromStorage();
+renderAll();
+
+// ============================================================================
+// МОДУЛЬ 2: СВЕТЛАЯ ТЕМА, ГЛАЗИК 👁 (ВОЗВРАТ МАТРИЦ A,B,C ИЗ ИСТОРИИ), СЛАУ И ФОРМУЛЫ
+// ============================================================================
+
+// Удаляем панель слотов M1/M2, если она была создана ранее
+document.getElementById("memorySlotsRow")?.remove();
+
+// --- 1. МЯГКАЯ И ГАРМОНИЧНАЯ СВЕТЛАЯ ТЕМА ---
+(function initLightThemeToggle() {
+  const styleEl = document.createElement("style");
+  styleEl.textContent = `
+    body.light-theme {
+      --bg-dark: #F4F6FB;
+      --bg-grad-top: #E8EEF7;
+      --card-dark: #FFFFFF;
+      --card-elevated: #F8FAFC;
+      --border-col: #D5DFEC;
+      --cyan: #0369A1;
+      --purple: #6D28D9;
+      --amber: #B45309;
+      --emerald: #047857;
+      --danger: #DC2626;
+      --text-white: #1E293B;
+      --text-dim: #64748B;
+      background: linear-gradient(180deg, #EBF1F8 0%, #F4F6FB 55%, #EDF2F9 100%) !important;
+      color: #1E293B !important;
+    }
+    body.light-theme .panel-card,
+    body.light-theme .result-card,
+    body.light-theme .modal-box,
+    body.light-theme .main-tabs,
+    body.light-theme .matrix-tabs,
+    body.light-theme .dim-card,
+    body.light-theme .history-btn {
+      background: #FFFFFF !important;
+      border-color: #D5DFEC !important;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05) !important;
+    }
+    body.light-theme #resultCardContainer div[style*="#0C1424"],
+    body.light-theme #modalBody div[style*="#0F172A"],
+    body.light-theme #modalBody div[style*="#0B1322"],
+    body.light-theme #modalBody div[style*="#161F30"] {
+      background: #F8FAFC !important;
+      border-color: #CBD5E1 !important;
+      color: #1E293B !important;
+    }
+    body.light-theme .matrix-cell,
+    body.light-theme .res-grid-cell,
+    body.light-theme .scalar-input,
+    body.light-theme .pole-input {
+      background: #F1F5F9 !important;
+      color: #0F172A !important;
+      border-color: #CBD5E1 !important;
+    }
+    body.light-theme .matrix-cell:focus {
+      background: #FFFFFF !important;
+      border-color: #0284C7 !important;
+      box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15) !important;
+    }
+    body.light-theme .q-chip,
+    body.light-theme .small-btn,
+    body.light-theme .cnt-btn {
+      background: #F1F5F9 !important;
+      color: #334155 !important;
+      border-color: #CBD5E1 !important;
+    }
+    body.light-theme .q-chip.q-cyan,
+    body.light-theme .small-btn.active,
+    body.light-theme .cat-pill.active-cyan,
+    body.light-theme .mat-chip.sel-A {
+      background: #E0F2FE !important;
+      color: #0369A1 !important;
+      border-color: #38BDF8 !important;
+    }
+    body.light-theme .q-chip.q-purple,
+    body.light-theme .cat-pill.active-purple,
+    body.light-theme .mat-chip.sel-B {
+      background: #F3E8FF !important;
+      color: #6D28D9 !important;
+      border-color: #C084FC !important;
+    }
+    body.light-theme .q-chip.q-emerald {
+      background: #D1FAE5 !important;
+      color: #047857 !important;
+      border-color: #34D399 !important;
+    }
+    body.light-theme .q-chip.q-amber,
+    body.light-theme .mat-chip.sel-C {
+      background: #FEF3C7 !important;
+      color: #B45309 !important;
+      border-color: #FBBF24 !important;
+    }
+    body.light-theme .q-chip.q-danger {
+      background: #FEE2E2 !important;
+      color: #DC2626 !important;
+      border-color: #FCA5A5 !important;
+    }
+    body.light-theme .op-btn {
+      background: #F0F9FF !important;
+      color: #0369A1 !important;
+      border-color: #7DD3FC !important;
+    }
+    body.light-theme .op-btn.purple {
+      background: #FAF5FF !important;
+      color: #6D28D9 !important;
+      border-color: #D8B4FE !important;
+    }
+    body.light-theme .scalar-bar {
+      background: #F1F5F9 !important;
+      border: 1px solid #CBD5E1 !important;
+    }
+  `;
+  document.head.appendChild(styleEl);
+
+  const histBtn = document.getElementById("btnOpenHistory");
+  if (histBtn && histBtn.parentElement && !document.getElementById("btnThemeToggle")) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.gap = "8px";
+    wrap.style.alignItems = "center";
+
+    const themeBtn = document.createElement("button");
+    themeBtn.id = "btnThemeToggle";
+    themeBtn.className = "history-btn";
+    themeBtn.style.padding = "8px 11px";
+    const isLight = localStorage.getItem("matrix_lab_theme") === "light";
+    if (isLight) document.body.classList.add("light-theme");
+    themeBtn.textContent = isLight ? "🌙 Тёмная" : "☀️ Светлая";
+
+    themeBtn.onclick = () => {
+      const nowLight = document.body.classList.toggle("light-theme");
+      localStorage.setItem("matrix_lab_theme", nowLight ? "light" : "dark");
+      themeBtn.textContent = nowLight ? "🌙 Тёмная" : "☀️ Светлая";
+    };
+
+    histBtn.parentElement.insertBefore(wrap, histBtn);
+    wrap.appendChild(themeBtn);
+    wrap.appendChild(histBtn);
+  }
+})();
+
+// --- 2. СНИМОК СОСТОЯНИЯ И ИСТОРИЯ С ГЛАЗИКОМ 👁 И ⭐ ИЗБРАННЫМ ---
+function makeCurrentInputSnapshot() {
+  return {
+    algDim: state.algDim.map(d => ({ r: d.r, c: d.c })),
+    tauN: state.tauN,
+    tauM: state.tauM,
+    tauK: state.tauK,
+    matrices: state.matrices.map(m => m.map(r => [...r]))
+  };
+}
+
+// Переопределяем saveHistory, чтобы КАЖДЫЙ расчёт сохранял введённые матрицы A, B, C
+saveHistory = function(title, text, mat = null) {
+  state.history.unshift({
+    id: Date.now(),
+    title,
+    text,
+    mat: mat ? mat.map(r => [...r]) : null,
+    inputSnap: makeCurrentInputSnapshot(),
+    pinned: false,
+    time: new Date().toLocaleTimeString()
+  });
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  if (state.history.length > 150) state.history.pop();
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  const cntEl = document.getElementById("historyCount");
+  if (cntEl) cntEl.textContent = state.history.length;
+};
+
+function cleanHistoryText(raw) {
+  return prettifyWebMath(raw || "")
+    .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "")
+    .replace(/\[ПФ:\s*([^/]+?)\s*\/\/\/\s*([^\]]+?)\]/g, "($1) / ($2)");
+}
+
+// Извлекает первую матрицу из текста отчёта (для старых записей истории, где ещё не было inputSnap)
+function extractFirstMatrixFromText(text) {
+  if (!text) return null;
+  const lines = text.split(/\r?\n/);
+  const isMat = (s) => {
+    const t = s.trim();
+    return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
+      (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
+  };
+  const rows = [];
+  let started = false;
+  for (const l of lines) {
+    if (isMat(l)) {
+      started = true;
+      const cl = l.trim().replace(/^[⎡⎢⎣│\[]+/, '').replace(/[⎤⎥⎦│\]]+$/, '').trim();
+      const nums = cl.split(/\s+/).map(parseSmartCell);
+      if (nums.length) rows.push(nums);
+    } else if (started) break;
+  }
+  return rows.length ? rows : null;
+}
+
+saveHistory = function(title, text, mat = null) {
+  const givenHdr = typeof buildGivenMatricesHeader === "function" ? buildGivenMatricesHeader(title) : "";
+  const body = text || (mat ? formatMatrixAligned(mat, state.symbolicMode) : "");
+  const fullText = (givenHdr && !body.includes("ИСХОДНЫЕ ДАННЫЕ (ДАНО):")) ? `${givenHdr}\n${body}` : body;
+
+  state.history.unshift({
+    id: Date.now(),
+    title,
+    text: fullText,
+    mat: mat ? mat.map(r => [...r]) : null,
+    pinned: false,
+    time: new Date().toLocaleTimeString()
+  });
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  if (state.history.length > 150) state.history.pop();
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  const cntEl = document.getElementById("historyCount");
+  if (cntEl) cntEl.textContent = state.history.length;
+};
+
+function restoreHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  state.resTitle = h.title;
+  state.resText = h.text;
+  state.resMatrix = h.mat;
+  state.resGrid = null;
+  state.isError = false;
+  state.activeReportSection = -1;
+  closeModal();
+  renderResultCard();
+  showToast("👁 Открыто в карточке результата (Дано + Решение)!");
+}
+
+function copyHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  navigator.clipboard?.writeText(`${prettifyWebMath(h.title)}\n\n${cleanHistoryText(h.text)}`);
+  showToast("Запись скопирована!");
+}
+
+function exportHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  state.resTitle = h.title;
+  state.resText = h.text;
+  state.resMatrix = h.mat;
+  state.resGrid = null;
+  state.isError = false;
+  renderResultCard();
+  openExportChoiceModal();
+}
+
+function togglePinHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  h.pinned = !h.pinned;
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  document.getElementById("btnOpenHistory").click();
+}
+
+function clearUnpinnedHistory() {
+  state.history = state.history.filter(h => h.pinned);
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  renderAll();
+  document.getElementById("btnOpenHistory").click();
+  showToast("Незакреплённая история очищена (⭐ сохранены)");
+}
+
+document.getElementById("btnOpenHistory").onclick = () => {
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  const html = state.history.length ? state.history.map((h, idx) => `
+    <div style="background:#0F172A;border:1.2px solid ${h.pinned ? 'var(--amber)' : 'var(--border-col)'};border-radius:12px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12.5px;color:${h.pinned ? 'var(--amber)' : 'var(--cyan)'};font-weight:800;">
+          ${h.pinned ? '⭐ ' : ''}${prettifyWebMath(h.title)}
+        </span>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <span style="color:var(--text-dim);font-size:11px;margin-right:2px;">${h.time}</span>
+          <button class="small-btn" style="color:${h.pinned ? 'var(--amber)' : 'var(--text-dim)'};" onclick="togglePinHistoryItem(${idx})" title="Закрепить">${h.pinned ? '⭐' : '☆'}</button>
+          <button class="small-btn active" onclick="restoreHistoryItem(${idx})" title="Восстановить введённые матрицы A, B, C и решение">👁 В матрицы</button>
+          <button class="small-btn" onclick="copyHistoryItem(${idx})">📋</button>
+          <button class="small-btn" style="color:var(--cyan);border-color:var(--cyan);" onclick="exportHistoryItem(${idx})">📤 PDF</button>
+        </div>
+      </div>
+      <pre class="res-text" style="margin:6px 0;font-size:12px;max-height:180px;overflow-y:auto;">${cleanHistoryText(h.text)}</pre>
+      ${h.mat ? `<div class="quick-row" style="margin-top:8px;">
+        <button class="q-chip q-cyan" onclick="transferToTarget(0, state.history[${idx}].mat);closeModal()">➔ в A</button>
+        <button class="q-chip q-purple" onclick="transferToTarget(1, state.history[${idx}].mat);closeModal()">➔ в B</button>
+        <button class="q-chip q-amber" onclick="transferToTarget(2, state.history[${idx}].mat);closeModal()">➔ в C</button>
+      </div>` : ""}
+    </div>`).join("") : `<p style="color:var(--text-dim);text-align:center;">История пуста</p>`;
+  openModal("История вычислений (👁 возвращает систему A, B, C)", html,
+    `<button class="small-btn" onclick="clearUnpinnedHistory()">🗑️ Очистить (кроме ⭐)</button>
+     <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
+};
+
+// --- 3. РЕШЕНИЕ СЛАУ A * X = B (ГАУСС-ЖОРДАН + КРОНЕКЕР-КАПЕЛЛИ + ФСР) ---
+function solveLinearSystemFullReport(matA, matB) {
+  const m = matA.length, n = matA[0].length;
+  const bCol = Array.from({ length: m }, (_, r) => (r < matB.length ? matB[r][0] : 0.0));
+  const aug = Array.from({ length: m }, (_, r) => [...matA[r], bCol[r]]);
+  const rA = math.rank(matA), rAb = math.rank(aug);
+  const rref = aug.map(r => [...r]);
+  const tol = 1e-7 * Math.max(1, ...rref.flat().map(Math.abs));
+  const pivotCols = [];
+  let pivRow = 0;
+
+  for (let col = 0; col < n && pivRow < m; col++) {
+    let best = pivRow;
+    for (let r = pivRow + 1; r < m; r++) if (Math.abs(rref[r][col]) > Math.abs(rref[best][col])) best = r;
+    if (Math.abs(rref[best][col]) <= tol) continue;
+    [rref[pivRow], rref[best]] = [rref[best], rref[pivRow]];
+    const pv = rref[pivRow][col];
+    for (let j = col; j <= n; j++) rref[pivRow][j] /= pv;
+    for (let r = 0; r < m; r++) {
+      if (r === pivRow) continue;
+      const f = rref[r][col];
+      if (Math.abs(f) > 0) for (let j = col; j <= n; j++) rref[r][j] -= f * rref[pivRow][j];
+    }
+    pivotCols.push(col); pivRow++;
+  }
+  for (let r = 0; r < m; r++) for (let c = 0; c <= n; c++) if (Math.abs(rref[r][c]) < 1e-9) rref[r][c] = 0.0;
+
+  const lines = [];
+  lines.push(`РЕШЕНИЕ СЛАУ A·X = B (A: ${m}×${n}, B: ${m}×1):`);
+  lines.push("Расширенная матрица системы [A | B]:\n" + formatMatrixAligned(aug));
+  lines.push("Приведённая ступенчатая форма Гаусса — Жордана (RREF):\n" + formatMatrixAligned(rref));
+  lines.push("════════════════════════════════");
+  lines.push("1) ПРОВЕРКА ПО ТЕОРЕМЕ КРОНЕКЕРА — КАПЕЛЛИ:");
+  lines.push(`• Ранг матрицы коэффициентов: rank(A) = ${rA}`);
+  lines.push(`• Ранг расширенной матрицы: rank(A | B) = ${rAb}`);
+  lines.push(`• Число неизвестных: n = ${n}`);
+
+  if (rA < rAb) {
+    lines.push("❌ Так как rank(A) < rank(A | B), по теореме Кронекера — Капелли система НЕСОВМЕСТНА (решений нет).");
+    return { report: lines.join("\n"), solMat: null };
+  }
+
+  const x0 = new Array(n).fill(0.0);
+  for (let idx = 0; idx < pivotCols.length; idx++) x0[pivotCols[idx]] = rref[idx][n];
+  const x0ColMat = x0.map(v => [v]);
+
+  if (rA === n) {
+    lines.push("✅ Так как rank(A) = rank(A | B) = n, система совместна и определённа (ЕДИНСТВЕННОЕ решение).");
+    lines.push("════════════════════════════════");
+    lines.push("2) ЕДИНСТВЕННОЕ РЕШЕНИЕ СИСТЕМЫ X:\n" + formatMatrixAligned(x0ColMat));
+    x0.forEach((v, i) => lines.push(`• x_${i + 1} = ${formatSymbolic(v)}`));
+    return { report: lines.join("\n"), solMat: x0ColMat };
+  }
+
+  const freeCols = Array.from({ length: n }, (_, c) => c).filter(c => !pivotCols.includes(c));
+  const fsrVectors = freeCols.map(fc => {
+    const v = new Array(n).fill(0.0); v[fc] = 1.0;
+    for (let idx = 0; idx < pivotCols.length; idx++) v[pivotCols[idx]] = Math.abs(rref[idx][fc]) < 1e-10 ? 0.0 : -rref[idx][fc];
+    return v;
+  });
+
+  lines.push(`⚠️ Так как rank(A) = rank(A | B) = ${rA} < n (${n}), система совместна и неопределённа (БЕСКОНЕЧНО МНОГО решений).`);
+  lines.push("════════════════════════════════");
+  lines.push("2) ЧАСТНОЕ РЕШЕНИЕ И ФСР:");
+  lines.push("Частное решение X_частн:\n" + formatMatrixAligned(x0ColMat));
+  fsrVectors.forEach((vec, k) => lines.push(`Вектор ФСР V_${k + 1} (при x_${freeCols[k] + 1} = 1):\n` + formatMatrixAligned(vec.map(x => [x]))));
+  lines.push("════════════════════════════════");
+  lines.push("3) ОБЩЕЕ РЕШЕНИЕ СЛАУ:");
+  lines.push(`X = X_частн + ${fsrVectors.map((_, k) => `c_${k + 1}·V_${k + 1}`).join(" + ")}`);
+  return { report: lines.join("\n"), solMat: x0ColMat };
+}
+
+function runSlauSolver() {
+  try {
+    const { report, solMat } = solveLinearSystemFullReport(getParsedMatrix(0), getParsedMatrix(1));
+    showTextResult("Решение СЛАУ A·X = B (Гаусс и ФСР)", report, solMat);
+  } catch (e) { showTextResult("Ошибка решения СЛАУ", e.message, null, null, true); }
+}
+
+// --- 4. КАЛЬКУЛЯТОР МАТРИЧНЫХ ФОРМУЛ ---
+state.formulaExpr = "2*A^2 - 3*A + 5*I";
+
+function evaluateMatrixFormula(exprStr, matA, matB, matC) {
+  const n = matA.length, matI = math.identityMatrix(n);
+  const isScalar = (x) => typeof x === "number";
+  const toMat = (x, r = n, c = n) => {
+    if (!isScalar(x)) return x;
+    if (r !== c) throw new Error("Скаляр можно складывать только с квадратной матрицей (как k·I)");
+    return math.multiplyScalar(math.identityMatrix(r), x);
+  };
+  const addVal = (a, b) => {
+    if (isScalar(a) && isScalar(b)) return a + b;
+    const mA = isScalar(a) ? toMat(a, b.length, b[0].length) : a, mB = isScalar(b) ? toMat(b, a.length, a[0].length) : b;
+    const res = math.add(mA, mB); if (!res) throw new Error("Несовместимые размеры для сложения"); return res;
+  };
+  const subVal = (a, b) => {
+    if (isScalar(a) && isScalar(b)) return a - b;
+    const mA = isScalar(a) ? toMat(a, b.length, b[0].length) : a, mB = isScalar(b) ? toMat(b, a.length, a[0].length) : b;
+    const res = math.subtract(mA, mB); if (!res) throw new Error("Несовместимые размеры для вычитания"); return res;
+  };
+  const mulVal = (a, b) => {
+    if (isScalar(a) && isScalar(b)) return a * b;
+    if (isScalar(a)) return math.multiplyScalar(b, a);
+    if (isScalar(b)) return math.multiplyScalar(a, b);
+    const res = math.multiply(a, b); if (!res) throw new Error("Несовместимые размеры для умножения"); return res;
+  };
+  const powVal = (base, exp) => {
+    if (exp === "T") return isScalar(base) ? base : math.transpose(base);
+    if (!isScalar(exp) || !Number.isInteger(exp)) throw new Error("Степень должна быть целым числом или T");
+    if (isScalar(base)) return Math.pow(base, exp);
+    const res = math.matrixPower(base, exp); if (!res) throw new Error(`Матрица не обратима для степени ${exp}`); return res;
+  };
+
+  let s = exprStr.replace(/[−–—]/g, "-").replace(/×/g, "*").replace(/\s+/g, "");
+  s = s.replace(/(\d)([ABCIEabcie(])/g, "$1*$2").replace(/([ABCIE)])([ABCIE(])/g, "$1*$2");
+  const tokens = []; let idx = 0;
+  while (idx < s.length) {
+    const ch = s[idx];
+    if ("+-*/^()".includes(ch)) { tokens.push(ch); idx++; }
+    else if (/[\d.]/.test(ch)) { let ns = ""; while (idx < s.length && /[\d.]/.test(s[idx])) ns += s[idx++]; tokens.push(Number(ns)); }
+    else if (/[a-zA-Z]/.test(ch)) { let id = ""; while (idx < s.length && /[a-zA-Z]/.test(s[idx])) id += s[idx++]; tokens.push(id); }
+    else throw new Error(`Неизвестный символ: "${ch}"`);
+  }
+  let pos = 0;
+  const peek = () => tokens[pos], consume = () => tokens[pos++];
+  function parseExpr() {
+    let left = parseTerm();
+    while (peek() === "+" || peek() === "-") { const op = consume(), right = parseTerm(); left = op === "+" ? addVal(left, right) : subVal(left, right); }
+    return left;
+  }
+  function parseTerm() {
+    let left = parseUnary();
+    while (peek() === "*" || peek() === "/") {
+      const op = consume(), right = parseUnary();
+      if (op === "*") left = mulVal(left, right);
+      else { if (!isScalar(right) || Math.abs(right) < 1e-15) throw new Error("Деление на ноль"); left = mulVal(left, 1.0 / right); }
+    }
+    return left;
+  }
+  function parseUnary() {
+    if (peek() === "+") { consume(); return parseUnary(); }
+    if (peek() === "-") { consume(); return mulVal(-1, parseUnary()); }
+    let base = parsePrimary();
+    while (peek() === "^") {
+      consume(); let sign = 1;
+      if (peek() === "-") { consume(); sign = -1; } else if (peek() === "+") consume();
+      const et = consume();
+      if (et === "T" || et === "t") base = powVal(base, "T");
+      else if (typeof et === "number") base = powVal(base, sign * et);
+      else throw new Error("Ожидается степень после ^");
+    }
+    return base;
+  }
+  function parsePrimary() {
+    const tok = consume();
+    if (tok === "(") { const v = parseExpr(); if (consume() !== ")") throw new Error("Пропущена ')'"); return v; }
+    if (typeof tok === "number") return tok;
+    if (typeof tok === "string") {
+      const up = tok.toUpperCase();
+      if (up === "INV" || up === "T") {
+        if (consume() !== "(") throw new Error(`Ожидается '(' после ${tok}`);
+        const arg = parseExpr(); if (consume() !== ")") throw new Error("Пропущена ')'");
+        return up === "T" ? math.transpose(arg) : (math.inverse(arg) || (() => { throw new Error("Матрица вырождена"); })());
+      }
+      if (up === "A") return matA;
+      if (up === "B") return matB;
+      if (up === "C") return matC;
+      if (up === "I" || up === "E") return matI;
+    }
+    throw new Error(`Ошибка в формуле возле "${tok ?? ''}"`);
+  }
+  const finalRes = parseExpr();
+  return isScalar(finalRes) ? [[finalRes]] : finalRes;
+}
+
+function runFormulaCalc() {
+  try {
+    const inp = document.getElementById("formulaExprInput");
+    if (inp) state.formulaExpr = inp.value;
+    const res = evaluateMatrixFormula(state.formulaExpr, getParsedMatrix(0), getParsedMatrix(1), getParsedMatrix(2));
+    showMatrixResult(res, `Формула: ${state.formulaExpr}`);
+  } catch (e) { showTextResult(`Формула: ${state.formulaExpr}`, e.message, null, null, true); }
+}
+
+const _prevRenderOpsPanel = renderOperationsPanel;
+renderOperationsPanel = function() {
+  _prevRenderOpsPanel();
+  if (state.mainTab === 0) {
+    const panel = document.getElementById("operationsPanel");
+    if (!panel || document.getElementById("formulaCalcBox")) return;
+    const extraDiv = document.createElement("div");
+    extraDiv.id = "formulaCalcBox";
+    extraDiv.innerHTML = `
+      <div class="sec-header" style="margin-top:12px;">Решение СЛАУ и Матричный калькулятор формул</div>
+      <div class="btn-row">
+        <button class="op-btn purple" onclick="runSlauSolver()">🧮 Решить СЛАУ A · X = B (Метод Гаусса и ФСР)</button>
+      </div>
+      <div class="scalar-bar" style="flex-wrap:wrap;gap:6px;padding:8px 10px;">
+        <span style="font-size:11.5px;color:var(--cyan);font-weight:700;width:100%;">Формула (доступны A, B, C, I, +, −, *, ^2, ^-1, ^T, inv(A)):</span>
+        <input class="scalar-input" id="formulaExprInput" style="flex:1;min-width:160px;text-align:left;padding:0 10px;font-family:monospace;font-size:14px;"
+          value="${state.formulaExpr}" oninput="state.formulaExpr=this.value"
+          onkeydown="if(event.key==='Enter')runFormulaCalc()" />
+        <button class="scalar-go" style="flex:0 0 115px;" onclick="runFormulaCalc()">Вычислить</button>
+      </div>
+    `;
+    panel.appendChild(extraDiv);
+  }
 };
 
 renderAll();
