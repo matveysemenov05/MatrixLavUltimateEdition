@@ -107,19 +107,16 @@ const MatrixSquareRoot = {
       const err = this.norm(this.subtract(this.multiply(root, root), a)) / Math.max(1, this.norm(a));
       return (Number.isFinite(err) && err <= tol) ? { root, err } : null;
     };
-    // 1. Диагональные матрицы
     if (input.every((r, i) => r.every((v, j) => i === j || v === 0))) {
       const root = this.zero(n);
       for (let i = 0; i < n; i++) root[i][i] = this.sqrtComplex(a[i][i]);
       return check(root);
     }
-    // 2. Треугольные матрицы (метод Бьёрка — Хаммарлинга)
     if (input.every((r, i) => r.slice(0, i).every(v => v === 0))) return check(this.solveUpperTriangular(a));
     if (input.every((r, i) => r.slice(i + 1).every(v => v === 0))) {
       const ut = this.solveUpperTriangular(this.transpose(a));
       return ut ? check(this.transpose(ut)) : null;
     }
-    // 3. Аналитическая формула Кэли — Гамильтона для матриц 2×2
     if (n === 2) {
       const det = a[0][0].times(a[1][1]).minus(a[0][1].times(a[1][0]));
       const tr = a[0][0].plus(a[1][1]);
@@ -144,7 +141,6 @@ const MatrixSquareRoot = {
         return cands[0];
       }
     }
-    // 4. Итерации Денмана — Биверса с масштабированием Хайэма
     let y = this.copy(a), z = this.identity(n);
     for (let it = 0; it < 100; it++) {
       const invY = this.inverse(y), invZ = this.inverse(z);
@@ -342,7 +338,11 @@ class MatrixMath {
       }
       return this.norm(this.subtract(this.multiply(y, y), m)) / Math.max(1, this.norm(m)) < 1e-3 ? y : null;
     };
-    while (this.norm(this.subtract(x, id)) > 0.35 && roots < 20) { x = sqrtDB(x); if (!x) return null; roots++; }
+    while (this.norm(this.subtract(x, id)) > 0.35 && roots < 20) {
+      x = MatrixSquareRoot.computeReal(x) || sqrtDB(x);
+      if (!x) return null;
+      roots++;
+    }
     const xm = this.subtract(x, id), xp = this.add(x, id), invXp = this.inverse(xp);
     if (!invXp) return null;
     const y = this.multiply(xm, invXp), y2 = this.multiply(y, y);
@@ -353,7 +353,9 @@ class MatrixMath {
       sum = this.add(sum, term);
       if (this.norm(term) < 1e-13) break;
     }
-    return this.multiplyScalar(sum, 2.0 * Math.pow(2, roots));
+    const res = this.multiplyScalar(sum, 2.0 * Math.pow(2, roots));
+    const expC = this.matrixExponential(res);
+    return (expC && this.norm(this.subtract(expC, a)) / Math.max(1, this.norm(a)) < 1e-3) ? res : null;
   }
   matrixTrig(a) {
     const n = a.length, id = this.identityMatrix(n);
@@ -526,7 +528,6 @@ class MatrixMath {
       });
     };
 
-    // Прямое решение неоднородной системы (A - λI) * h = rhs для присоединённых векторов жордановой цепочки
     const solveAssociatedSystem = (nMat, rhs) => {
       const aug = Array.from({ length: n }, (_, r) => [
         ...nMat[r].map(c => new Complex(c.re, c.im)),
@@ -610,7 +611,6 @@ class MatrixMath {
         }
         let curP = nMat, deg = 2;
         while (list.length < n && deg <= n) {
-          // 1. Сначала ищем точный присоединённый вектор (A - λI) * h = v_prev
           const prevVecs = list.filter(x => x.lvl === deg - 1);
           for (const pv of prevVecs) {
             const hSol = solveAssociatedSystem(nMat, pv.vec);
@@ -618,7 +618,6 @@ class MatrixMath {
               list.push({ vec: hSol, lvl: deg });
             }
           }
-          // 2. Добираем из Ker((A - λI)^deg), если нужно
           curP = MatrixSquareRoot.multiply(curP, nMat);
           for (const cand of nullspaceComplex(curP)) {
             if (isIndep(list.map(x => x.vec), cand)) {
@@ -865,8 +864,6 @@ class MatrixMath {
     }
     return inter;
   }
-  
-
   kalmanNotebookDecomposition(matA, matB) {
     const n = matA.length, cleanB = this.trimZeroColsB(matB), w = this.controllability(matA, cleanB), r = this.rank(w);
     if (r <= 0) return null;
@@ -895,8 +892,6 @@ class MatrixMath {
     const sMat = Array.from({ length: n }, (_, r) => cols.map(c => c[r])), sInv = this.inverse(sMat);
     return sInv ? [r, sMat, sInv] : null;
   }
-
-
   kalmanOrthogonalDecomposition(matA, matB) {
     const n = matA.length, cleanB = this.trimZeroColsB(matB), w = this.controllability(matA, cleanB), r = this.rank(w);
     if (r <= 0 || r >= n) return null;
@@ -957,7 +952,13 @@ class MatrixMath {
         const sb = cleanB.map(r => [r[col]]);
         if (this.rank(this.controllability(matA, sb)) === rTot) { chosenG[col] = 1; bEff = sb; break; }
       }
-      if (!bEff) { chosenG = new Array(m).fill(1); bEff = cleanB.map(r => [r.reduce((a, b) => a + b, 0)]); }
+      if (!bEff) {
+        for (const gVec of [new Array(m).fill(1), Array.from({ length: m }, (_, j) => j + 1), Array.from({ length: m }, (_, j) => (j % 2 === 0 ? 1 : -1))]) {
+          const tb = cleanB.map(r => [r.reduce((s, v, j) => s + v * gVec[j], 0)]);
+          if (this.rank(this.controllability(matA, tb)) === rTot) { chosenG = gVec; bEff = tb; break; }
+        }
+      }
+      if (!bEff) throw new Error("Многовходовая система не сводится к одному входу. Используйте LQR.");
       const k1 = this.ackermann(matA, bEff, desiredPoles);
       return Array.from({ length: m }, (_, r) => Array.from({ length: n }, (_, c) => chosenG[r] * k1[0][c]));
     }
@@ -972,6 +973,7 @@ class MatrixMath {
       }
       if (coeffs.some(c => Math.abs(c.im) > 1e-3)) throw new Error("Комплексные полюса должны образовывать сопряжённые пары!");
       const wcInv = this.inverse(this.controllability(ac, bc));
+      if (!wcInv) throw new Error("Матрица управляемости подсистемы вырождена.");
       let poly = Array.from({ length: dim }, () => new Array(dim).fill(0));
       for (let i = 0; i <= dim; i++) poly = this.add(poly, this.multiplyScalar(this.matrixPower(ac, dim - i), coeffs[i].re));
       const last = wcInv[dim - 1], kRow = [new Array(dim).fill(0)];
@@ -1069,16 +1071,16 @@ class MatrixMath {
         const aCtrl = Array.from({ length: r }, (_, i) => Array.from({ length: r }, (_, j) => aTilde[i][j]));
         lines.push("\nРазложение Калмана по управляемости (базис S):");
         lines.push(`Матрица преобразования S [стб: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(sMat));
-        lines.push("Обратная матрица S⁻¹:\n" + formatMatrixAligned(sInv));
+        lines.push(`Обратная матрица S⁻¹ [стр: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(sInv));
         lines.push(`Новая матрица Ã = S⁻¹ A S [блоки: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(aTilde));
         lines.push(`Новая матрица B̃ = S⁻¹ B [стр: упр=${r}, неупр=${n - r}]:\n` + formatMatrixAligned(bTilde));
-        lines.push(`Управляемая часть Ac (${r}×${r}):\n` + formatMatrixAligned(aCtrl));
+        lines.push(`Управляемая часть Ac (${r}×${r}) [блоки: упр=${r}, неупр=0]:\n` + formatMatrixAligned(aCtrl));
 
         if (r < n) {
           const aUn = Array.from({ length: n - r }, (_, i) => Array.from({ length: n - r }, (_, j) => aTilde[r + i][r + j]));
           const unEigs = this.eigenvalues(aUn);
           isStabilizable = unEigs.every(e => e.re < -1e-7);
-          lines.push(`Неуправляемая часть Au (${n - r}×${n - r}):\n` + formatMatrixAligned(aUn));
+          lines.push(`Неуправляемая часть Au (${n - r}×${n - r}) [блоки: упр=0, неупр=${n - r}]:\n` + formatMatrixAligned(aUn));
           lines.push(`Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.join(", ")} }`);
           lines.push(isStabilizable
             ? "➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).\n➔ Вывод: система не полностью управляема, но СТАБИЛИЗИРУЕМА. Регулятор построить можно."
@@ -1110,8 +1112,8 @@ class MatrixMath {
         const aTD = this.multiply(this.multiply(tInvDual, aT), tDual);
         const tObs = this.transpose(tInvDual), tObsInv = this.transpose(tDual);
         lines.push("\nРазложение Калмана по наблюдаемости (базис T_o):");
-        lines.push("Матрица перехода T_o:\n" + formatMatrixAligned(tObs));
-        lines.push("Обратная матрица T_o⁻¹:\n" + formatMatrixAligned(tObsInv));
+        lines.push(`Матрица перехода T_o [стб: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(tObs));
+        lines.push(`Обратная матрица T_o⁻¹ [стр: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(tObsInv));
         lines.push(`Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(this.multiply(this.multiply(tObsInv, matA), tObs)));
         lines.push(`Матрица C̃_o = C T_o [стб: упр=${rO}, неупр=${n - rO}]:\n` + formatMatrixAligned(this.multiply(cleanC, tObs)));
 
@@ -1160,7 +1162,7 @@ class MatrixMath {
           const n1 = t1.length, n2 = t2.length, n3 = t3.length, n4 = t4.length;
           lines.push(`\nРазмерности подпространств Калмана: dim(T₁)=${n1}, dim(T₂)=${n2}, dim(T₃)=${n3}, dim(T₄)=${n4}`);
           lines.push(`Матрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(tFull));
-          lines.push("Обратная матрица T⁻¹:\n" + formatMatrixAligned(tInv));
+          lines.push(`Обратная матрица T⁻¹ [стр_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(tInv));
           lines.push(`Матрица Â = T⁻¹ A T [калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(aHat));
           lines.push(`Матрица B̂ = T⁻¹ B [стр_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(tInv, cleanB)));
           lines.push(`Матрица Ĉ = C T [стб_калман: T1=${n1}, T2=${n2}, T3=${n3}, T4=${n4}]:\n` + formatMatrixAligned(this.multiply(cleanC, tFull)));
