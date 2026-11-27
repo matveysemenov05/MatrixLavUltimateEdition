@@ -56,7 +56,6 @@ function toSymbolicToken(value, isExpMode = false) {
     return { plainText: String(nearestInt) };
   }
 
-  // Находит лучшую цепную дробь p/q со знаменателем <= maxQ для ЛЮБОГО числа
   function findBestFraction(x, maxQ, relTol) {
     const ax = Math.abs(x);
     if (ax < 1e-7 || ax > 1e7) return null;
@@ -76,28 +75,25 @@ function toSymbolicToken(value, isExpMode = false) {
 
   const signStr = value < 0 ? "−" : "", absVal = Math.abs(value);
 
-  // 1. РЕЖИМ ЭКСПОНЕНТЫ e^A: гарантированно переводим КАЖДУЮ ячейку в форму с e^k и дробью!
   if (isExpMode) {
     const k0 = Math.max(-20, Math.min(30, Math.round(Math.log(absVal))));
     const localPowers = [];
-    for (let d = -3; d <= 2; d++) {
+    for (const d of [0, 1, -1, 2, -2, 3, -3]) {
       const k = k0 + d;
-      if (k !== 0) localPowers.push(k);
+      if (k !== 0 && !localPowers.includes(k)) localPowers.push(k);
     }
     for (const k of [1, 2, 3, -1, -2]) {
       if (!localPowers.includes(k)) localPowers.push(k);
     }
 
-    // 1а. Ищем точное выражение (a * e^k + b) / q
     for (const k of localPowers) {
       const ePow = Math.exp(k), eStr = k === 1 ? "e" : "e" + toSuperscriptStr(k);
       for (let q = 1; q <= 12; q++) {
         const scaled = value * q;
-        for (let a = -16; a <= 16; a++) {
-          if (a === 0) continue;
+        for (const a of [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 8, -8, 9, -9, 12, -12]) {
           const b = Math.round(scaled - a * ePow);
           if (Math.abs(b) > 16) continue;
-          if (Math.abs(value - (a * ePow + b) / q) / Math.max(1.0, absVal) <= 1e-4) {
+          if (Math.abs(value - (a * ePow + b) / q) / Math.max(1.0, absVal) <= 1e-6) {
             const g = gcdNum(gcdNum(a, b), q), a1 = a / g, b1 = b / g, q1 = q / g;
             const aTerm = a1 === 1 ? eStr : a1 === -1 ? "−" + eStr : a1 + eStr;
             const expr = b1 === 0 ? aTerm : b1 > 0 ? `${aTerm}+${b1}` : `${aTerm}−${Math.abs(b1)}`;
@@ -109,8 +105,7 @@ function toSymbolicToken(value, isExpMode = false) {
       }
     }
 
-    // 1б. Ищем комбинацию двух экспонент (a * e^k1 + b * e^k2) / q вокруг масштаба числа k0
-    let bestCombo = null, bestErr = 1e-3;
+    let bestCombo = null, bestErr = 1e-6;
     for (let i = 0; i < localPowers.length; i++) {
       for (let j = i + 1; j < localPowers.length; j++) {
         const k1 = localPowers[i], k2 = localPowers[j];
@@ -139,29 +134,28 @@ function toSymbolicToken(value, isExpMode = false) {
     }
     if (bestCombo) return bestCombo;
 
-    // 1в. Если степени собственные не целые — представляем как дробь (p/q)·e^k0
     const kUse = k0 === 0 ? 1 : k0;
     const eStr = kUse === 1 ? "e" : "e" + toSuperscriptStr(kUse);
     const ratio = absVal / Math.exp(kUse);
-    const fracE = findBestFraction(ratio, 32, 1e-2) || [Math.max(1, Math.round(ratio * 10)), 10];
-    const g = gcdNum(fracE[0], fracE[1]);
-    const p1 = fracE[0] / g, q1 = fracE[1] / g;
-    if (q1 === 1) return { plainText: `${signStr}${p1 === 1 ? "" : p1}${eStr}` };
-    return { isFraction: true, sign: signStr, num: String(p1), den: String(q1), suffix: eStr };
+    const fracE = findBestFraction(ratio, 32, 1e-4);
+    if (fracE) {
+      const g = gcdNum(fracE[0], fracE[1]);
+      const p1 = fracE[0] / g, q1 = fracE[1] / g;
+      if (q1 === 1) return { plainText: `${signStr}${p1 === 1 ? "" : p1}${eStr}` };
+      return { isFraction: true, sign: signStr, num: String(p1), den: String(q1), suffix: eStr };
+    }
+    return { plainText: formatNumber(value) };
   }
 
-  // 2. Короткие точные дроби со знаменателем до 16
   const f16 = findBestFraction(absVal, 16, 1e-5);
   if (f16) return { isFraction: true, sign: signStr, num: String(f16[0]), den: String(f16[1]), suffix: "" };
 
-  // 3. Корни √2, √3, √5, √6, √7 (для небольших чисел)
   if (absVal <= 30) {
     for (const rad of [2, 3, 5, 6, 7]) {
       const rVal = Math.sqrt(rad), rStr = "√" + rad;
       for (let q = 1; q <= 12; q++) {
         const scaled = value * q;
-        for (let a = -12; a <= 12; a++) {
-          if (a === 0) continue;
+        for (const a of [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 8, -8, 9, -9, 12, -12]) {
           const b = Math.round(scaled - a * rVal);
           if (Math.abs(b) > 12) continue;
           if (Math.abs(value - (a * rVal + b) / q) / Math.max(1.0, absVal) <= 1e-6) {
@@ -177,16 +171,15 @@ function toSymbolicToken(value, isExpMode = false) {
     }
   }
 
-  // 4. Для всех остальных чисел при включённом режиме «Дроби: ВКЛ» — переводим в дробь со знаменателем до 64!
-  const fAny = findBestFraction(absVal, 64, 2e-3) || findBestFraction(absVal, 32, 1e-2);
+  const fAny = findBestFraction(absVal, 64, 1e-5);
   if (fAny) return { isFraction: true, sign: signStr, num: String(fAny[0]), den: String(fAny[1]), suffix: "" };
 
   return { plainText: formatNumber(value) };
 }
 
-function formatSymbolic(v) {
-  const t = toSymbolicToken(v);
-  return t.isFraction ? `${t.sign}${t.num}/${t.den}` : t.plainText;
+function formatSymbolic(v, isExpMode = false) {
+  const t = toSymbolicToken(v, isExpMode);
+  return t.isFraction ? `${t.sign}${t.num}/${t.den}${t.suffix ? "·" + t.suffix : ""}` : t.plainText;
 }
 
 function formatMatrixAligned(matrix, symbolic = false) {
@@ -229,11 +222,13 @@ const state = {
     Array.from({ length: 7 }, () => new Array(7).fill("0"))
   ],
   scalarK: "1", resTitle: "Результат", resText: "", resMatrix: null, resGrid: null, isError: false, symbolicMode: false,
+  showAllThree: false, activeReportSection: -1, formulaExpr: "2*A^2 - 3*A + 5*I",
   history: JSON.parse(localStorage.getItem("matrix_lab_history_v1") || "[]")
 };
 
 function showToast(msg) {
   const el = document.getElementById("toastBox");
+  if (!el) return;
   el.textContent = msg; el.classList.add("show");
   setTimeout(() => el.classList.remove("show"), 2000);
 }
@@ -261,19 +256,50 @@ function setDims(idx, newR, newC) {
   renderAll();
 }
 
+function makeCurrentInputSnapshot() {
+  return {
+    algDim: state.algDim.map(d => ({ r: d.r, c: d.c })),
+    tauN: state.tauN,
+    tauM: state.tauM,
+    tauK: state.tauK,
+    matrices: state.matrices.map(m => m.map(r => [...r]))
+  };
+}
 
+function saveHistory(title, text, mat = null) {
+  const givenHdr = typeof buildGivenMatricesHeader === "function" ? buildGivenMatricesHeader(title) : "";
+  const body = text || (mat ? formatMatrixAligned(mat, state.symbolicMode) : "");
+  const fullText = (givenHdr && !body.includes("ИСХОДНЫЕ ДАННЫЕ (ДАНО):")) ? `${givenHdr}\n${body}` : body;
+
+  state.history.unshift({
+    id: Date.now(),
+    title,
+    text: fullText,
+    mat: mat ? mat.map(r => [...r]) : null,
+    inputSnap: makeCurrentInputSnapshot(),
+    pinned: false,
+    time: new Date().toLocaleTimeString()
+  });
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  if (state.history.length > 150) state.history.pop();
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  const cntEl = document.getElementById("historyCount");
+  if (cntEl) cntEl.textContent = state.history.length;
+}
 
 function showMatrixResult(mat, title) {
   if (!mat || mat.some(r => r.some(v => !Number.isFinite(v)))) {
     showTextResult(title, `Не удалось выполнить операцию "${title}".\nПроверьте размеры матриц и невырожденность.`, null, null, true);
     return;
   }
+  state.activeReportSection = -1;
   state.resTitle = title; state.resMatrix = mat; state.resGrid = null; state.resText = ""; state.isError = false;
   saveHistory(title, formatMatrixAligned(mat), mat);
   renderResultCard();
 }
 
 function showTextResult(title, text, mat = null, grid = null, err = false) {
+  state.activeReportSection = -1;
   state.resTitle = title; state.resText = text; state.resMatrix = mat; state.resGrid = grid; state.isError = err;
   if (!err) saveHistory(title, text, mat);
   renderResultCard();
@@ -281,11 +307,28 @@ function showTextResult(title, text, mat = null, grid = null, err = false) {
 
 function transferToTarget(targetIdx, mat) {
   if (!mat || !mat.length || !mat[0].length) return;
+  pushUndoState();
   const r = Math.min(7, Math.max(1, mat.length)), c = Math.min(7, Math.max(1, mat[0].length));
   for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) state.matrices[targetIdx][i][j] = formatNumber(mat[i][j], 5);
   setDims(targetIdx, r, c); state.selTab = targetIdx;
+  saveMatricesToStorage();
   renderAll();
   showToast(`Перенесено в ${["A", "B", "C"][targetIdx]} (${r}×${c})`);
+}
+
+function swapMatrices(i1, i2) {
+  pushUndoState();
+  const m1 = getParsedMatrix(i1), m2 = getParsedMatrix(i2);
+  const r1 = m1.length, c1 = m1[0].length, r2 = m2.length, c2 = m2[0].length;
+  for (let i = 0; i < r2; i++) for (let j = 0; j < c2; j++) state.matrices[i1][i][j] = formatNumber(m2[i][j], 5);
+  for (let i = 0; i < r1; i++) for (let j = 0; j < c1; j++) state.matrices[i2][i][j] = formatNumber(m1[i][j], 5);
+  if (state.mainTab === 0) {
+    state.algDim[i1] = { r: r2, c: c2 };
+    state.algDim[i2] = { r: r1, c: c1 };
+  }
+  saveMatricesToStorage();
+  renderAll();
+  showToast("Матрицы обменяны!");
 }
 
 function renderAll() {
@@ -359,21 +402,115 @@ function renderDimControls() {
 }
 
 function renderGridInput() {
-  const grid = document.getElementById("matrixGridInput"), { r, c } = getDims();
+  const grid = document.getElementById("matrixGridInput");
+  const bLeft = document.getElementById("bracketLeft");
+  const bRight = document.getElementById("bracketRight");
+  const btnAll3 = document.getElementById("chipShowAll3");
+  if (btnAll3) btnAll3.className = "mat-chip" + (state.showAllThree ? " sel-A" : "");
+
   grid.innerHTML = "";
-  for (let i = 0; i < r; i++) {
-    const rowEl = document.createElement("div"); rowEl.className = "matrix-grid-row";
-    for (let j = 0; j < c; j++) {
-      const inp = document.createElement("input");
-      inp.type = "text"; inp.autocomplete = "off"; inp.className = "matrix-cell";
-      inp.value = state.matrices[state.selTab][i][j];
-      inp.onfocus = () => { if (inp.value === "0") inp.value = ""; };
-      inp.onblur = () => { if (inp.value.trim() === "") inp.value = "0"; state.matrices[state.selTab][i][j] = inp.value.trim(); };
-      inp.oninput = () => { state.matrices[state.selTab][i][j] = inp.value; };
-      rowEl.appendChild(inp);
+  const names = ["A", "B", "C"];
+  const colors = ["var(--cyan)", "var(--purple)", "var(--amber)"];
+
+  function createSingleMatrixDom(tabIdx, showHeader) {
+    const { r, c } = getDims(tabIdx);
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.alignItems = "center";
+    if (showHeader) {
+      wrap.style.marginBottom = "10px";
+      const hdr = document.createElement("div");
+      hdr.style.color = colors[tabIdx];
+      hdr.style.fontWeight = "800";
+      hdr.style.fontSize = "12.5px";
+      hdr.style.marginBottom = "4px";
+      hdr.textContent = `Матрица ${names[tabIdx]} (${r}×${c})`;
+      wrap.appendChild(hdr);
     }
-    grid.appendChild(rowEl);
+
+    const bWrap = document.createElement("div");
+    bWrap.className = "matrix-bracket-wrap";
+    const leftBar = document.createElement("div");
+    leftBar.className = "bracket-line";
+    leftBar.style.background = colors[tabIdx];
+    const rightBar = document.createElement("div");
+    rightBar.className = "bracket-line";
+    rightBar.style.background = colors[tabIdx];
+
+    const mGrid = document.createElement("div");
+    mGrid.className = "matrix-grid";
+
+    for (let i = 0; i < r; i++) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "matrix-grid-row";
+      for (let j = 0; j < c; j++) {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.autocomplete = "off";
+        inp.className = "matrix-cell";
+        inp.id = `mcell_${tabIdx}_${i}_${j}`;
+        inp.value = state.matrices[tabIdx][i][j];
+
+        inp.onfocus = () => {
+          if (state.selTab !== tabIdx) {
+            state.selTab = tabIdx;
+            renderDimControls();
+          }
+          if (inp.value === "0") inp.value = "";
+          else setTimeout(() => inp.select(), 0);
+        };
+        inp.onblur = () => {
+          if (inp.value.trim() === "") inp.value = "0";
+          state.matrices[tabIdx][i][j] = inp.value.trim();
+          saveMatricesToStorage();
+        };
+        inp.oninput = () => {
+          state.matrices[tabIdx][i][j] = inp.value;
+          saveMatricesToStorage();
+        };
+        inp.onkeydown = (e) => {
+          let nr = i, nc = j;
+          if (e.key === "ArrowRight") nc++;
+          else if (e.key === "ArrowLeft") nc--;
+          else if (e.key === "ArrowDown") nr++;
+          else if (e.key === "ArrowUp") nr--;
+          else if (e.key === "Enter") {
+            e.preventDefault();
+            if (j + 1 < c) nc++;
+            else if (i + 1 < r) { nr++; nc = 0; }
+          } else return;
+
+          if ((e.key.startsWith("Arrow") && (inp.selectionStart === 0 || inp.selectionStart === inp.value.length || e.key === "ArrowUp" || e.key === "ArrowDown")) || e.key === "Enter") {
+            const target = document.getElementById(`mcell_${tabIdx}_${nr}_${nc}`);
+            if (target) { e.preventDefault(); target.focus(); }
+          }
+        };
+        rowEl.appendChild(inp);
+      }
+      mGrid.appendChild(rowEl);
+    }
+
+    if (showHeader) {
+      bWrap.appendChild(leftBar);
+      bWrap.appendChild(mGrid);
+      bWrap.appendChild(rightBar);
+      wrap.appendChild(bWrap);
+      return wrap;
+    }
+    return mGrid;
   }
+
+  if (state.showAllThree) {
+    bLeft.style.display = "none";
+    bRight.style.display = "none";
+    for (let t = 0; t < 3; t++) grid.appendChild(createSingleMatrixDom(t, true));
+  } else {
+    bLeft.style.display = "block";
+    bRight.style.display = "block";
+    grid.appendChild(createSingleMatrixDom(state.selTab, false));
+  }
+  saveMatricesToStorage();
 }
 
 function renderTransferRow() {
@@ -383,11 +520,6 @@ function renderTransferRow() {
     <button class="q-chip ${cls[o1]}" onclick="transferToTarget(${o1}, getParsedMatrix(${cur}))">${names[cur]} ➔ в ${names[o1]}</button>
     <button class="q-chip ${cls[o2]}" onclick="transferToTarget(${o2}, getParsedMatrix(${cur}))">${names[cur]} ➔ в ${names[o2]}</button>
     <button class="q-chip" onclick="swapMatrices(${cur}, ${o1})">${names[cur]} ⇄ ${names[o1]}</button>`;
-}
-
-function swapMatrices(i1, i2) {
-  const m1 = getParsedMatrix(i1), m2 = getParsedMatrix(i2);
-  transferToTarget(i1, m2); transferToTarget(i2, m1); showToast("Матрицы обменяны!");
 }
 
 function renderOperationsPanel() {
@@ -426,6 +558,17 @@ function renderOperationsPanel() {
         <span style="font-size:12px;color:var(--text-dim);">Скаляр k:</span>
         <input class="scalar-input" id="scalarInput" value="${state.scalarK}" oninput="state.scalarK=this.value" />
         <button class="scalar-go" onclick="showMatrixResult(math.multiplyScalar(getParsedMatrix(), parseSmartCell(state.scalarK)), 'Умножение ' + state.scalarK + ' × ${name}')">Вычислить k × ${name}</button>
+      </div>
+      <div class="sec-header" style="margin-top:12px;">Решение СЛАУ и Матричный калькулятор формул</div>
+      <div class="btn-row">
+        <button class="op-btn purple" onclick="runSlauSolver()">🧮 Решить СЛАУ A · X = B (Метод Гаусса и ФСР)</button>
+      </div>
+      <div class="scalar-bar" style="flex-wrap:wrap;gap:6px;padding:8px 10px;">
+        <span style="font-size:11.5px;color:var(--cyan);font-weight:700;width:100%;">Формула (доступны A, B, C, I, +, −, *, ^2, ^-1, ^T, inv(A)):</span>
+        <input class="scalar-input" id="formulaExprInput" style="flex:1;min-width:160px;text-align:left;padding:0 10px;font-family:monospace;font-size:14px;"
+          value="${state.formulaExpr}" oninput="state.formulaExpr=this.value"
+          onkeydown="if(event.key==='Enter')runFormulaCalc()" />
+        <button class="scalar-go" style="flex:0 0 115px;" onclick="runFormulaCalc()">Вычислить</button>
       </div>`;
   } else {
     const tName = r === c ? name : "A";
@@ -482,30 +625,31 @@ function renderOperationsPanel() {
   }
 }
 
-function renderSymbolicCellHtml(v, symbolic, isExpMode) {
-  if (!symbolic) return `<div class="res-grid-cell">${formatNumber(v)}</div>`;
+function renderSymbolicCellHtml(v, symbolic, isExpMode, zoneStyle = "") {
+  const stAttr = zoneStyle ? ` style="${zoneStyle}"` : "";
+  if (!symbolic) return `<div class="res-grid-cell"${stAttr}>${formatNumber(v)}</div>`;
   const t = toSymbolicToken(v, isExpMode);
   if (!t.isFraction) {
     const isSpec = t.plainText.includes("e") || t.plainText.includes("√");
-    return `<div class="res-grid-cell" style="${isSpec ? 'color:var(--cyan);font-weight:800;' : ''}">${t.plainText}</div>`;
+    const combined = `${zoneStyle}${isSpec ? 'color:var(--cyan);font-weight:800;' : ''}`;
+    return `<div class="res-grid-cell"${combined ? ` style="${combined}"` : ""}>${t.plainText}</div>`;
   }
   const sfx = t.suffix ? `<span style="color:var(--amber);font-weight:800;margin-left:2px;">${t.suffix}</span>` : "";
-  return `<div class="res-grid-cell"><span class="frac-box">${t.sign || ""}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span>${sfx}</span></div>`;
+  return `<div class="res-grid-cell"${stAttr}><span class="frac-box">${t.sign || ""}<span class="frac-col"><span>${t.num}</span><span class="frac-bar"></span><span>${t.den}</span></span>${sfx}</span></div>`;
 }
 
 function getSubspaceCellStyle(r, c, meta) {
   if (!meta) return "";
   const styles = {
-    1: "background:rgba(112,225,161,0.18);border:1.5px solid #70E1A1;",
-    2: "background:rgba(84,229,229,0.18);border:1.5px solid #54E5E5;",
-    3: "background:rgba(255,209,102,0.18);border:1.5px solid #FFD166;",
-    4: "background:rgba(248,113,113,0.18);border:1.5px solid #F87171;",
-    5: "background:rgba(182,154,255,0.10);border:1px dashed rgba(182,154,255,0.45);"
+    1: "background:rgba(112,225,161,0.22) !important;border:1.5px solid #10B981 !important;",
+    2: "background:rgba(84,229,229,0.22) !important;border:1.5px solid #06B6D4 !important;",
+    3: "background:rgba(255,209,102,0.24) !important;border:1.5px solid #F59E0B !important;",
+    4: "background:rgba(248,113,113,0.22) !important;border:1.5px solid #EF4444 !important;",
+    5: "background:rgba(182,154,255,0.12) !important;border:1px dashed rgba(182,154,255,0.5) !important;"
   };
   if (meta.type === "ctrl_blocks") {
     if (r < meta.r && c < meta.r) return styles[1];
     if (r >= meta.r && c >= meta.r) return styles[4];
-    
   } else if (meta.type === "ctrl_cols") return c < meta.r ? styles[1] : styles[4];
   else if (meta.type === "ctrl_rows") return r < meta.r ? styles[1] : styles[4];
   else if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
@@ -524,21 +668,21 @@ function buildLegendHtml(meta) {
   const pill = (col, bg, txt) => `<span style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;color:${col};background:${bg};border:1px solid ${col};">${txt}</span>`;
   if (meta.type === "ctrl_blocks" || meta.type === "ctrl_cols" || meta.type === "ctrl_rows") {
     return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">` +
-      pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 Управляемая часть (${meta.r})`) +
-      pill("#F87171", "rgba(248,113,113,0.14)", `🟥 Неуправляемая часть (${meta.u})`) + `</div>`;
+      pill("#10B981", "rgba(112,225,161,0.16)", `🟩 Управляемая часть (${meta.r})`) +
+      pill("#EF4444", "rgba(248,113,113,0.16)", `🟥 Неуправляемая часть (${meta.u})`) + `</div>`;
   }
   if (meta.type === "kalman_blocks" || meta.type === "kalman_cols" || meta.type === "kalman_rows") {
     const items = [];
-    if (meta.n1 > 0) items.push(pill("#70E1A1", "rgba(112,225,161,0.14)", `🟩 T₁ (${meta.n1}): упр., набл.`));
-    if (meta.n2 > 0) items.push(pill("#54E5E5", "rgba(84,229,229,0.14)", `🟦 T₂ (${meta.n2}): упр., ненабл.`));
-    if (meta.n3 > 0) items.push(pill("#FFD166", "rgba(255,209,102,0.14)", `🟨 T₃ (${meta.n3}): неупр., набл.`));
-    if (meta.n4 > 0) items.push(pill("#F87171", "rgba(248,113,113,0.14)", `🟥 T₄ (${meta.n4}): неупр., ненабл.`));
+    if (meta.n1 > 0) items.push(pill("#10B981", "rgba(112,225,161,0.16)", `🟩 T₁ (${meta.n1}): упр., набл.`));
+    if (meta.n2 > 0) items.push(pill("#06B6D4", "rgba(84,229,229,0.16)", `🟦 T₂ (${meta.n2}): упр., ненабл.`));
+    if (meta.n3 > 0) items.push(pill("#F59E0B", "rgba(255,209,102,0.18)", `🟨 T₃ (${meta.n3}): неупр., набл.`));
+    if (meta.n4 > 0) items.push(pill("#EF4444", "rgba(248,113,113,0.16)", `🟥 T₄ (${meta.n4}): неупр., ненабл.`));
     return `<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:2px 0 8px;">${items.join("")}</div>`;
   }
   return "";
 }
 
-function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
+function _baseParseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
   window._embeddedReportMatrices = [];
   reportText = prettifyWebMath(reportText);
   const sections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
@@ -569,8 +713,7 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
             <div class="matrix-grid">` +
             rows.map((r, ri) => `<div class="matrix-grid-row">` + r.map((v, ci) => {
               const zoneStyle = getSubspaceCellStyle(ri, ci, lastMeta);
-              const cellHtml = renderSymbolicCellHtml(v, symbolic, isExpMode);
-              return zoneStyle ? cellHtml.replace('class="res-grid-cell"', `class="res-grid-cell" style="${zoneStyle}"`) : cellHtml;
+              return renderSymbolicCellHtml(v, symbolic, isExpMode, zoneStyle);
             }).join("") + `</div>`).join("") +
             `</div><div class="bracket-line" style="background:var(--emerald);width:3.5px;"></div></div></div>` +
             buildLegendHtml(lastMeta) +
@@ -631,6 +774,43 @@ function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
     html += `</div>`;
     return html;
   }).join("");
+}
+
+function parseRichSectionHtml(reportText, symbolic = false, isExpMode = false) {
+  const rawSections = reportText.split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
+  if (rawSections.length <= 1) {
+    return _baseParseRichSectionHtml(reportText, symbolic, isExpMode);
+  }
+  const getShortTabTitle = (sec, idx) => {
+    const first = (sec.split(/\r?\n/)[0] || "").trim();
+    if (first.includes("ПРОСТРАНСТВЕ СОСТОЯНИЙ")) return "Система";
+    if (first.includes("УПРАВЛЯЕМОСТИ")) return "1) Упр.";
+    if (first.includes("НАБЛЮДАЕМОСТИ")) return "2) Набл.";
+    if (first.includes("РАЗЛОЖЕНИЕ КАЛМАНА") || first.includes("КАЛМАНА T")) return "3) Калман T";
+    if (first.includes("ИТОГОВЫЙ ВЫВОД")) return "Итог";
+    if (first.includes("РЕГУЛЯТОРА")) return "Регулятор K";
+    if (first.includes("НАБЛЮДАТЕЛЯ")) return "Наблюдатель L";
+    if (first.includes("ЗНАМЕНАТЕЛЬ")) return "1) Знам. A(s)";
+    if (first.includes("ЧИСЛИТЕЛЬ")) return "2) Числ. B(s)";
+    if (first.includes("КОЭФФИЦИЕНТ ПЕРЕДАЧИ")) return "3) Дробь W(s)";
+    if (first.includes("ГУРВИЦА")) return "2) Гурвиц";
+    return `Шаг ${idx + 1}`;
+  };
+
+  let navHtml = `<div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--border-col);">`;
+  const allActive = state.activeReportSection === -1;
+  navHtml += `<button class="small-btn ${allActive ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=-1;renderResultCard()">📑 Все шаги (${rawSections.length})</button>`;
+  rawSections.forEach((sec, idx) => {
+    const act = state.activeReportSection === idx;
+    navHtml += `<button class="small-btn ${act ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=${idx};renderResultCard()">${getShortTabTitle(sec, idx)}</button>`;
+  });
+  navHtml += `</div>`;
+
+  const filteredText = state.activeReportSection === -1
+    ? reportText
+    : rawSections[state.activeReportSection] || reportText;
+
+  return navHtml + _baseParseRichSectionHtml(filteredText, symbolic, isExpMode);
 }
 
 function renderResultCard() {
@@ -749,7 +929,7 @@ function opStabilityCont() {
     });
     const allPos = deltas.every(d => d > 1e-8), lines = [];
     lines.push("АНАЛИЗ УСТОЙЧИВОСТИ НЕПРЕРЫВНОЙ СИСТЕМЫ:");
-    lines.push(maxRe < -1e-8 ? "✅ СИСТЕМА АСИМПТОТИЧЕСКИ УСТОЙЧИВА (все Re λᵢ < 0)"
+    lines.push(maxRe < -1e-8 ? "✅ СИСТЕМА АСИМПТОТИЧЕСЧЕСКИ УСТОЙЧИВА (все Re λᵢ < 0)"
       : maxRe > 1e-8 ? "❌ СИСТЕМА НЕУСТОЙЧИВА (есть Re λᵢ > 0)"
       : "⚠️ СИСТЕМА НА ГРАНИЦЕ УСТОЙЧИВОСТИ (есть Re λᵢ = 0)");
     lines.push("\n1) Спектральный критерий (собственные числа A):");
@@ -931,8 +1111,6 @@ function parseSinglePole(str) {
   return new Complex(re, imS === '+' ? 1 : imS === '-' ? -1 : Number(imS));
 }
 
-
-
 function openObserverModal() {
   const n = state.tauN;
   try {
@@ -980,8 +1158,6 @@ function updateObsPolesLiveSection() {
   }
   box.innerHTML = `<div style="color:${obsRank === n ? 'var(--emerald)' : 'var(--amber)'};font-size:11.5px;font-weight:600;margin:6px 0 8px;">${stTxt}</div>${rowsHtml}`;
 }
-
-
 
 function openLqrModal() {
   const n = state.tauN, m = state.tauM;
@@ -1050,7 +1226,6 @@ function formatDiffEq(den, num) {
   };
   return `${side(den, "y")} = ${side(num, "u")}`;
 }
-
 
 function openTfToSsModal(skipSync = false) {
   if (!skipSync) {
@@ -1129,18 +1304,6 @@ function openTfToSsModal(skipSync = false) {
 }
 
 function changeTfOrder(newN) {
-  if (newN > tfDialogState.n) {
-    tfDialogState.num.unshift("0");
-    tfDialogState.den.unshift("1");
-  } else if (newN < tfDialogState.n) {
-    tfDialogState.num.shift();
-    tfDialogState.den.shift();
-  }
-  tfDialogState.n = newN;
-  openTfToSsModal(true);
-}
-
-function changeTfOrder(newN) {
   if (newN > tfDialogState.n) { tfDialogState.num.unshift("0"); tfDialogState.den.unshift("1"); }
   else if (newN < tfDialogState.n) { tfDialogState.num.shift(); tfDialogState.den.shift(); }
   tfDialogState.n = newN; openTfToSsModal(true);
@@ -1157,8 +1320,6 @@ function updateTfPreview() {
     <div style="color:var(--cyan);font-weight:800;font-family:monospace;font-size:13px;">${formatPolyS(den)}</div>
   </div>`;
 }
-
-
 
 function openSsToTfModal() {
   const n = state.tauN, m = state.tauM, k = state.tauK;
@@ -1341,7 +1502,6 @@ function runSsToTfCalc() {
     });
     tfDialogState.n = n; tfDialogState.den = denCoeffs.map(v => formatNumber(v, 5)); tfDialogState.num = ["0", ...numCoeffs.map(v => formatNumber(v, 5))];
 
-    // Проверка сократимости полюсов и нулей (НОД Евклида)
     const gcdP = numCoeffs.some(v => Math.abs(v) > 1e-8) ? polyGcd(denCoeffs, numCoeffs) : [1];
     const hasCancel = gcdP.length > 1;
     const [redDen, remDen] = hasCancel ? polyDivMod(denCoeffs, gcdP) : [denCoeffs, [0]];
@@ -1353,7 +1513,7 @@ function runSsToTfCalc() {
     lines.push("Формула коэффициента передачи: W(s) = C·(sI − A)⁻¹·B = B(s) / A(s)");
     lines.push("════════════════════════════════");
     lines.push("1) ЗНАМЕНАТЕЛЬ A(s) = det(sI − A) (по методу Фаддеева — Леверье):");
-    lines.push(`Коэффициенты: [ ${denCoeffs.map(formatSymbolic).join(", ")} ]\nA(s) = ${formatPolyS(denCoeffs)}`);
+    lines.push(`Коэффициенты: [ ${denCoeffs.map(v => formatSymbolic(v)).join(", ")} ]\nA(s) = ${formatPolyS(denCoeffs)}`);
     lines.push("════════════════════════════════");
     lines.push("2) ЧИСЛИТЕЛЬ B(s) = C·adj(sI − A)·B:");
     lines.push(`Присоединённая матрица adj(sI − A) = F_1·s^${n - 1} + ... + F_${n}, где β_{n-k} = C·F_k·B:`);
@@ -1361,7 +1521,7 @@ function runSsToTfCalc() {
       const pwr = n - k, sTag = pwr === 0 ? "1" : pwr === 1 ? "s" : `s${toSuperscriptStr(pwr)}`;
       lines.push(`• При ${sTag}: C·F_${k}·B = ${formatSymbolic(numCoeffs[k - 1])}`);
     }
-    lines.push(`Коэффициенты числителя: [ ${numCoeffs.map(formatSymbolic).join(", ")} ]\nB(s) = ${formatPolyS(numCoeffs)}`);
+    lines.push(`Коэффициенты числителя: [ ${numCoeffs.map(v => formatSymbolic(v)).join(", ")} ]\nB(s) = ${formatPolyS(numCoeffs)}`);
     lines.push("════════════════════════════════");
     lines.push("3) ИТОГОВЫЙ КОЭФФИЦИЕНТ ПЕРЕДАЧИ W(s):");
     lines.push(`W(s) = [ПФ: ${formatPolyS(numCoeffs)} /// ${formatPolyS(denCoeffs)}]`);
@@ -1400,7 +1560,7 @@ function openPowerModal() {
     `<p style="font-size:13px;color:var(--text-dim);">Введите целую степень k (от -50 до 500):</p>
      <input class="pole-input" id="pwrKInp" value="3" style="width:100%;" />`,
     `<button class="small-btn" onclick="closeModal()">Отмена</button>
-     <button class="op-btn" style="height:36px;flex:0 0 120px;" onclick="showMatrixResult(math.matrixPower(getParsedMatrix(0), parseInt(document.getElementById('pwrKInp').value)||1), 'Степень A^k');closeModal()">Вычислить</button>`);
+     <button class="op-btn" style="height:36px;flex:0 0 120px;" onclick="const k=parseInt(document.getElementById('pwrKInp').value,10);const p=Number.isNaN(k)?1:k;showMatrixResult(math.matrixPower(getParsedMatrix(0), p), 'Степень A^'+p);closeModal()">Вычислить</button>`);
 }
 
 function copyEmbeddedMat(idx) {
@@ -1428,7 +1588,6 @@ function openExportChoiceModal() {
   );
 }
 
-// Формирует блок "ИСХОДНЫЕ ДАННЫЕ (ДАНО)" с исходными матрицами A, B, C для любой функции
 function buildGivenMatricesHeader(title) {
   const t = String(title || "");
   const mA = getParsedMatrix(0), mB = getParsedMatrix(1), mC = getParsedMatrix(2);
@@ -1442,17 +1601,13 @@ function buildGivenMatricesHeader(title) {
   } else if (/A \+ B \+ C|A − B − C|A × B × C/.test(t)) {
     useA = true; useB = true; useC = true;
   } else if (/Блок-схема|Калман|W\(s\)/.test(t)) {
-    useA = true;
-    useB = hasNonZero(mB);
-    useC = hasNonZero(mC);
+    useA = true; useB = hasNonZero(mB); useC = hasNonZero(mC);
   } else if (/Управляемост|Фробениус|Модальное|Регулятор|LQR|СЛАУ|A \+ B|A − B|A × B|a · b|a ⨯ b/.test(t)) {
     useA = true; useB = true;
   } else if (/Наблюдаемост|Наблюдатель/.test(t)) {
     useA = true; useC = true;
   } else if (/Формула/.test(t)) {
-    useA = /A/i.test(t);
-    useB = /B/i.test(t);
-    useC = /C/i.test(t);
+    useA = /A/i.test(t); useB = /B/i.test(t); useC = /C/i.test(t);
     if (!useA && !useB && !useC) useA = true;
   }
 
@@ -1477,8 +1632,9 @@ function buildGivenMatricesHeader(title) {
 }
 
 function getFullDocumentTextWithGiven() {
-  const givenBlock = buildGivenMatricesHeader(state.resTitle);
   let bodyTxt = state.resText || "";
+  if (bodyTxt.includes("ИСХОДНЫЕ ДАННЫЕ (ДАНО):")) return bodyTxt;
+  const givenBlock = buildGivenMatricesHeader(state.resTitle);
   if (state.resGrid) {
     bodyTxt += (bodyTxt ? "\n" : "") + state.resGrid.map(r => `[ ${r.join("  ")} ]`).join("\n");
   } else if (state.resMatrix && !bodyTxt.includes("⎡") && !bodyTxt.includes("│")) {
@@ -1584,42 +1740,6 @@ function exportWebPdfPrint() {
   win.document.close();
 }
 
-// Быстрые кнопки и вкладки
-document.getElementById("tabMain0").onclick = () => { state.mainTab = 0; renderAll(); };
-document.getElementById("tabMain1").onclick = () => { state.mainTab = 1; renderAll(); };
-document.getElementById("chipMatA").onclick = () => { state.selTab = 0; renderAll(); };
-document.getElementById("chipMatB").onclick = () => { state.selTab = 1; renderAll(); };
-document.getElementById("chipMatC").onclick = () => { state.selTab = 2; renderAll(); };
-
-document.getElementById("btnRandom").onclick = () => {
-  const { r, c } = getDims();
-  for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) state.matrices[state.selTab][i][j] = String(Math.floor(Math.random() * 19) - 9);
-  renderGridInput();
-};
-document.getElementById("btnIdentity").onclick = () => {
-  const { r, c } = getDims();
-  for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) state.matrices[state.selTab][i][j] = i === j ? "1" : "0";
-  renderGridInput();
-};
-document.getElementById("btnClearMat").onclick = () => {
-  for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) state.matrices[state.selTab][i][j] = "0";
-  renderGridInput();
-};
-document.getElementById("btnCopyMat").onclick = () => {
-  const txt = getParsedMatrix().map(r => r.join("\t")).join("\n");
-  navigator.clipboard?.writeText(txt);
-  showToast("Матрица скопирована!");
-};
-document.getElementById("btnPasteMat").onclick = async () => {
-  const raw = (await navigator.clipboard?.readText?.().catch(() => null)) || prompt("Вставьте числа матрицы:");
-  if (!raw) return;
-  const rows = raw.replace(/[−–]/g, '-').split(/\r?\n/).map(l => l.match(/[+-]?\d+(?:[./]\d+)?/g)).filter(Boolean);
-  if (!rows.length) return showToast("Не удалось распознать числа");
-  const nr = Math.min(7, rows.length), nc = Math.min(7, Math.max(...rows.map(r => r.length)));
-  for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) state.matrices[state.selTab][i][j] = rows[i][j] || "0";
-  setDims(state.selTab, nr, nc);
-  showToast(`Вставлено (${nr}×${nc})`);
-};
 function copyResult() {
   const txt = prettifyWebMath(state.resText || (state.resMatrix ? formatMatrixAligned(state.resMatrix, state.symbolicMode) : ""))
     .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "")
@@ -1627,69 +1747,19 @@ function copyResult() {
   navigator.clipboard?.writeText(txt);
   showToast("Результат скопирован!");
 }
+
 function cleanHistoryText(raw) {
   return prettifyWebMath(raw || "")
     .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "")
     .replace(/\[ПФ:\s*([^/]+?)\s*\/\/\/\s*([^\]]+?)\]/g, "($1) / ($2)");
 }
 
-
-
-function copyHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  navigator.clipboard?.writeText(`${prettifyWebMath(h.title)}\n\n${cleanHistoryText(h.text)}`);
-  showToast("Запись скопирована!");
-}
-
-function exportHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  // Загружаем запись в карточку результата и сразу открываем окно выбора PDF / LaTeX / Текст
-  state.resTitle = h.title;
-  state.resText = h.text;
-  state.resMatrix = h.mat;
-  state.resGrid = null;
-  state.isError = false;
-  renderResultCard();
-  openExportChoiceModal();
-}
-
-document.getElementById("btnOpenHistory").onclick = () => {
-  const html = state.history.length ? state.history.map((h, idx) => `
-    <div style="background:#0F172A;border:1px solid var(--border-col);border-radius:12px;padding:12px;margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-        <span style="font-size:12.5px;color:var(--cyan);font-weight:800;">${prettifyWebMath(h.title)}</span>
-        <div style="display:flex;align-items:center;gap:5px;">
-          <span style="color:var(--text-dim);font-size:11px;margin-right:4px;">${h.time}</span>
-          <button class="small-btn" onclick="restoreHistoryItem(${idx})" title="Открыть в карточке результата">👁 Открыть</button>
-          <button class="small-btn" onclick="copyHistoryItem(${idx})" title="Скопировать">📋</button>
-          <button class="small-btn" style="color:var(--cyan);border-color:var(--cyan);" onclick="exportHistoryItem(${idx})">📤 PDF / LaTeX</button>
-        </div>
-      </div>
-      <pre class="res-text" style="margin:6px 0;font-size:12px;max-height:180px;overflow-y:auto;">${cleanHistoryText(h.text)}</pre>
-      ${h.mat ? `<div class="quick-row" style="margin-top:8px;">
-        <button class="q-chip q-cyan" onclick="transferToTarget(0, state.history[${idx}].mat);closeModal()">➔ в A</button>
-        <button class="q-chip q-purple" onclick="transferToTarget(1, state.history[${idx}].mat);closeModal()">➔ в B</button>
-        <button class="q-chip q-amber" onclick="transferToTarget(2, state.history[${idx}].mat);closeModal()">➔ в C</button>
-      </div>` : ""}
-    </div>`).join("") : `<p style="color:var(--text-dim);text-align:center;">История пуста</p>`;
-  openModal("История вычислений", html,
-    `<button class="small-btn" onclick="state.history=[];localStorage.removeItem('matrix_lab_history_v1');renderAll();closeModal()">🗑️ Очистить</button>
-     <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
-};
-
-renderAll();
-
 // ============================================================================
-// МОДУЛЬ УДОБСТВА (АВТОСОХРАНЕНИЕ, UNDO, РЕЖИМ "ВСЕ 3 МАТРИЦЫ", СТРЕЛКИ, ЗАКЛАДКИ ОТЧЁТА)
+// АВТОСОХРАНЕНИЕ, UNDO / REDO, "ВСЕ 3 МАТРИЦЫ", ИСТОРИЯ, СВЕТЛАЯ ТЕМА, СЛАУ И ФОРМУЛЫ
 // ============================================================================
-state.showAllThree = false;
-state.activeReportSection = -1; // -1 = показывать все шаги отчёта
-const undoStack = [];
-
-// 1. АВТОСОХРАНЕНИЕ И ЗАГРУЗКА МАТРИЦ A, B, C ПРИ ПЕРЕЗАГРУЗКЕ СТРАНИЦЫ
 const STATE_STORAGE_KEY = "matrix_lab_saved_state_v2";
+const undoStack = [];
+const redoStack = [];
 
 function saveMatricesToStorage() {
   try {
@@ -1727,9 +1797,6 @@ function loadMatricesFromStorage() {
   } catch (_) {}
 }
 
-// 2. СТЕК ОТМЕНЫ (UNDO) И ОЧИСТКА ВСЕХ 3 МАТРИЦ
-const redoStack = [];
-
 function getSnapshot() {
   return {
     algDim: state.algDim.map(d => ({ ...d })),
@@ -1741,11 +1808,11 @@ function getSnapshot() {
 }
 
 function applySnapshot(snap) {
-  state.algDim = snap.algDim;
+  state.algDim = snap.algDim.map(d => ({ ...d }));
   state.tauN = snap.tauN;
   state.tauM = snap.tauM;
   state.tauK = snap.tauK;
-  state.matrices = snap.matrices;
+  state.matrices = snap.matrices.map(m => m.map(r => [...r]));
   saveMatricesToStorage();
   renderAll();
 }
@@ -1757,20 +1824,14 @@ function pushUndoState() {
 }
 
 function popUndoState() {
-  if (!undoStack.length) {
-    showToast("Нет действий для отмены");
-    return;
-  }
+  if (!undoStack.length) return showToast("Нет действий для отмены");
   redoStack.push(getSnapshot());
   applySnapshot(undoStack.pop());
   showToast("↩️ Отменено (шаг назад)");
 }
 
 function popRedoState() {
-  if (!redoStack.length) {
-    showToast("Нет действий для возврата вперёд");
-    return;
-  }
+  if (!redoStack.length) return showToast("Нет действий для возврата вперёд");
   undoStack.push(getSnapshot());
   applySnapshot(redoStack.pop());
   showToast("↪️ Возвращено (шаг вперёд)");
@@ -1788,7 +1849,6 @@ function clearAllThreeMatrices() {
   showToast("🧹 Все матрицы (A, B, C) очищены!");
 }
 
-// 3. ДОБАВЛЯЕМ КНОПКИ "👁 Все 3", "↩️" И "🧹 Все=0" В ПАНЕЛЬ ИНСТРУМЕНТОВ
 (function injectConvenienceButtons() {
   const tabsBar = document.querySelector(".matrix-tabs");
   if (tabsBar && !document.getElementById("chipShowAll3")) {
@@ -1808,10 +1868,8 @@ function clearAllThreeMatrices() {
   const clearBtn = document.getElementById("btnClearMat");
   if (clearBtn && clearBtn.parentElement && !document.getElementById("rowUndoRedo")) {
     const firstRow = clearBtn.parentElement;
-    // Оставляем в первом ряду ровно 4 широкие кнопки (Рандом, Единич., Копир., Встав.)
     clearBtn.style.display = "none";
 
-    // Создаём второй просторный ряд из 4 кнопок: ↩️ Назад | ↪️ Вперёд | ✕ Сброс | 🧹 Все = 0
     const secondRow = document.createElement("div");
     secondRow.id = "rowUndoRedo";
     secondRow.className = "quick-row";
@@ -1825,7 +1883,12 @@ function clearAllThreeMatrices() {
   }
 })();
 
-// Перехватываем кнопки Рандом, Единичная, Сброс и Перенос для записи в Undo и Автосохранения
+document.getElementById("tabMain0").onclick = () => { state.mainTab = 0; renderAll(); };
+document.getElementById("tabMain1").onclick = () => { state.mainTab = 1; renderAll(); };
+document.getElementById("chipMatA").onclick = () => { state.selTab = 0; renderAll(); };
+document.getElementById("chipMatB").onclick = () => { state.selTab = 1; renderAll(); };
+document.getElementById("chipMatC").onclick = () => { state.selTab = 2; renderAll(); };
+
 document.getElementById("btnRandom").onclick = () => {
   pushUndoState();
   const targets = state.showAllThree ? [0, 1, 2] : [state.selTab];
@@ -1858,205 +1921,105 @@ document.getElementById("btnClearMat").onclick = () => {
   renderGridInput();
 };
 
-const _baseTransferToTarget = transferToTarget;
-transferToTarget = function(targetIdx, mat) {
+document.getElementById("btnCopyMat").onclick = () => {
+  const txt = getParsedMatrix().map(r => r.join("\t")).join("\n");
+  navigator.clipboard?.writeText(txt);
+  showToast("Матрица скопирована!");
+};
+
+document.getElementById("btnPasteMat").onclick = async () => {
+  const raw = (await navigator.clipboard?.readText?.().catch(() => null)) || prompt("Вставьте числа матрицы:");
+  if (!raw) return;
+  const rows = raw.replace(/[−–]/g, '-').split(/\r?\n/).map(l => l.match(/[+-]?\d+(?:[./]\d+)?/g)).filter(Boolean);
+  if (!rows.length) return showToast("Не удалось распознать числа");
   pushUndoState();
-  _baseTransferToTarget(targetIdx, mat);
+  const nr = Math.min(7, rows.length), nc = Math.min(7, Math.max(...rows.map(r => r.length)));
+  for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) state.matrices[state.selTab][i][j] = rows[i][j] || "0";
+  setDims(state.selTab, nr, nc);
   saveMatricesToStorage();
+  showToast(`Вставлено (${nr}×${nc})`);
 };
 
-const _baseSwapMatrices = swapMatrices;
-swapMatrices = function(i1, i2) {
-  pushUndoState();
-  _baseSwapMatrices(i1, i2);
-  saveMatricesToStorage();
-};
-
-// 4. УЛУЧШЕННАЯ СЕТКА ВВОДА: АВТОВЫДЕЛЕНИЕ ПРИ КЛИКЕ, СТРЕЛКИ/ENTER И РЕЖИМ "👁 ВСЕ 3 МАТРИЦЫ"
-renderGridInput = function() {
-  const grid = document.getElementById("matrixGridInput");
-  const bLeft = document.getElementById("bracketLeft");
-  const bRight = document.getElementById("bracketRight");
-  const btnAll3 = document.getElementById("chipShowAll3");
-  if (btnAll3) {
-    btnAll3.className = "mat-chip" + (state.showAllThree ? " sel-A" : "");
-  }
-
-  grid.innerHTML = "";
-  const names = ["A", "B", "C"];
-  const colors = ["var(--cyan)", "var(--purple)", "var(--amber)"];
-
-  function createSingleMatrixDom(tabIdx, showHeader) {
-    const { r, c } = getDims(tabIdx);
-    const wrap = document.createElement("div");
-    wrap.style.display = "flex";
-    wrap.style.flexDirection = "column";
-    wrap.style.alignItems = "center";
-    if (showHeader) {
-      wrap.style.marginBottom = "10px";
-      const hdr = document.createElement("div");
-      hdr.style.color = colors[tabIdx];
-      hdr.style.fontWeight = "800";
-      hdr.style.fontSize = "12.5px";
-      hdr.style.marginBottom = "4px";
-      hdr.textContent = `Матрица ${names[tabIdx]} (${r}×${c})`;
-      wrap.appendChild(hdr);
-    }
-
-    const bWrap = document.createElement("div");
-    bWrap.className = "matrix-bracket-wrap";
-    const leftBar = document.createElement("div");
-    leftBar.className = "bracket-line";
-    leftBar.style.background = colors[tabIdx];
-    const rightBar = document.createElement("div");
-    rightBar.className = "bracket-line";
-    rightBar.style.background = colors[tabIdx];
-
-    const mGrid = document.createElement("div");
-    mGrid.className = "matrix-grid";
-
-    for (let i = 0; i < r; i++) {
-      const rowEl = document.createElement("div");
-      rowEl.className = "matrix-grid-row";
-      for (let j = 0; j < c; j++) {
-        const inp = document.createElement("input");
-        inp.type = "text";
-        inp.autocomplete = "off";
-        inp.className = "matrix-cell";
-        inp.id = `mcell_${tabIdx}_${i}_${j}`;
-        inp.value = state.matrices[tabIdx][i][j];
-
-        // Автовыделение числа при клике в ячейку (чтобы сразу печатать поверх старого числа!)
-        inp.onfocus = () => {
-          if (state.selTab !== tabIdx) {
-            state.selTab = tabIdx;
-            renderDimControls();
-          }
-          if (inp.value === "0") {
-            inp.value = "";
-          } else {
-            setTimeout(() => inp.select(), 0);
-          }
-        };
-        inp.onblur = () => {
-          if (inp.value.trim() === "") inp.value = "0";
-          state.matrices[tabIdx][i][j] = inp.value.trim();
-          saveMatricesToStorage();
-        };
-        inp.oninput = () => {
-          state.matrices[tabIdx][i][j] = inp.value;
-          saveMatricesToStorage();
-        };
-
-        // Навигация стрелками клавиатуры и клавишей Enter (как в Excel)
-        inp.onkeydown = (e) => {
-          let nr = i, nc = j;
-          if (e.key === "ArrowRight") nc++;
-          else if (e.key === "ArrowLeft") nc--;
-          else if (e.key === "ArrowDown") nr++;
-          else if (e.key === "ArrowUp") nr--;
-          else if (e.key === "Enter") {
-            e.preventDefault();
-            if (j + 1 < c) nc++;
-            else if (i + 1 < r) { nr++; nc = 0; }
-          } else return;
-
-          if ( (e.key.startsWith("Arrow") && (inp.selectionStart === 0 || inp.selectionStart === inp.value.length || e.key === "ArrowUp" || e.key === "ArrowDown")) || e.key === "Enter") {
-            const target = document.getElementById(`mcell_${tabIdx}_${nr}_${nc}`);
-            if (target) {
-              e.preventDefault();
-              target.focus();
-            }
-          }
-        };
-
-        rowEl.appendChild(inp);
-      }
-      mGrid.appendChild(rowEl);
-    }
-
-    if (showHeader) {
-      bWrap.appendChild(leftBar);
-      bWrap.appendChild(mGrid);
-      bWrap.appendChild(rightBar);
-      wrap.appendChild(bWrap);
-      return wrap;
-    }
-    return mGrid;
-  }
-
-  if (state.showAllThree) {
-    bLeft.style.display = "none";
-    bRight.style.display = "none";
-    for (let t = 0; t < 3; t++) {
-      grid.appendChild(createSingleMatrixDom(t, true));
-    }
-  } else {
-    bLeft.style.display = "block";
-    bRight.style.display = "block";
-    grid.appendChild(createSingleMatrixDom(state.selTab, false));
-  }
-  saveMatricesToStorage();
-};
-
-// 5. НАВИГАЦИОННЫЕ ЗАКЛАДКИ ПО ШАГАМ ДЛИННОГО ОТЧЁТА ([Все шаги] [1) Упр.] [2) Набл.] [3) Калман] [Регулятор])
-const _baseShowTextResult = showTextResult;
-showTextResult = function(title, text, mat = null, grid = null, err = false) {
+function restoreHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  if (h.inputSnap) applySnapshot(h.inputSnap);
+  state.resTitle = h.title;
+  state.resText = h.text;
+  state.resMatrix = h.mat;
+  state.resGrid = null;
+  state.isError = false;
   state.activeReportSection = -1;
-  _baseShowTextResult(title, text, mat, grid, err);
+  closeModal();
+  renderResultCard();
+  showToast("👁 Восстановлены матрицы A, B, C и решение!");
+}
+
+function copyHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  navigator.clipboard?.writeText(`${prettifyWebMath(h.title)}\n\n${cleanHistoryText(h.text)}`);
+  showToast("Запись скопирована!");
+}
+
+function exportHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  state.resTitle = h.title;
+  state.resText = h.text;
+  state.resMatrix = h.mat;
+  state.resGrid = null;
+  state.isError = false;
+  renderResultCard();
+  openExportChoiceModal();
+}
+
+function togglePinHistoryItem(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  h.pinned = !h.pinned;
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  document.getElementById("btnOpenHistory").click();
+}
+
+function clearUnpinnedHistory() {
+  state.history = state.history.filter(h => h.pinned);
+  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
+  renderAll();
+  document.getElementById("btnOpenHistory").click();
+  showToast("Незакреплённая история очищена (⭐ сохранены)");
+}
+
+document.getElementById("btnOpenHistory").onclick = () => {
+  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
+  const html = state.history.length ? state.history.map((h, idx) => `
+    <div style="background:#0F172A;border:1.2px solid ${h.pinned ? 'var(--amber)' : 'var(--border-col)'};border-radius:12px;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12.5px;color:${h.pinned ? 'var(--amber)' : 'var(--cyan)'};font-weight:800;">
+          ${h.pinned ? '⭐ ' : ''}${prettifyWebMath(h.title)}
+        </span>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <span style="color:var(--text-dim);font-size:11px;margin-right:2px;">${h.time}</span>
+          <button class="small-btn" style="color:${h.pinned ? 'var(--amber)' : 'var(--text-dim)'};" onclick="togglePinHistoryItem(${idx})" title="Закрепить">${h.pinned ? '⭐' : '☆'}</button>
+          <button class="small-btn active" onclick="restoreHistoryItem(${idx})" title="Восстановить введённые матрицы A, B, C и решение">👁 В матрицы</button>
+          <button class="small-btn" onclick="copyHistoryItem(${idx})">📋</button>
+          <button class="small-btn" style="color:var(--cyan);border-color:var(--cyan);" onclick="exportHistoryItem(${idx})">📤 PDF</button>
+        </div>
+      </div>
+      <pre class="res-text" style="margin:6px 0;font-size:12px;max-height:180px;overflow-y:auto;">${cleanHistoryText(h.text)}</pre>
+      ${h.mat ? `<div class="quick-row" style="margin-top:8px;">
+        <button class="q-chip q-cyan" onclick="transferToTarget(0, state.history[${idx}].mat);closeModal()">➔ в A</button>
+        <button class="q-chip q-purple" onclick="transferToTarget(1, state.history[${idx}].mat);closeModal()">➔ в B</button>
+        <button class="q-chip q-amber" onclick="transferToTarget(2, state.history[${idx}].mat);closeModal()">➔ в C</button>
+      </div>` : ""}
+    </div>`).join("") : `<p style="color:var(--text-dim);text-align:center;">История пуста</p>`;
+  openModal("История вычислений (👁 возвращает систему A, B, C)", html,
+    `<button class="small-btn" onclick="clearUnpinnedHistory()">🗑️ Очистить (кроме ⭐)</button>
+     <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
 };
 
-const _baseParseRichSectionHtml = parseRichSectionHtml;
-parseRichSectionHtml = function(reportText, symbolic = false, isExpMode = false) {
-  const rawSections = prettifyWebMath(reportText).split(/[═─]{6,}/).map(s => s.trim()).filter(Boolean);
-  if (rawSections.length <= 1) {
-    return _baseParseRichSectionHtml(reportText, symbolic, isExpMode);
-  }
-
-  const getShortTabTitle = (sec, idx) => {
-    const first = (sec.split(/\r?\n/)[0] || "").trim();
-    if (first.includes("ПРОСТРАНСТВЕ СОСТОЯНИЙ")) return "Система";
-    if (first.includes("УПРАВЛЯЕМОСТИ")) return "1) Упр.";
-    if (first.includes("НАБЛЮДАЕМОСТИ")) return "2) Набл.";
-    if (first.includes("РАЗЛОЖЕНИЕ КАЛМАНА") || first.includes("КАЛМАНА T")) return "3) Калман T";
-    if (first.includes("ИТОГОВЫЙ ВЫВОД")) return "Итог";
-    if (first.includes("РЕГУЛЯТОРА")) return "Регулятор K";
-    if (first.includes("НАБЛЮДАТЕЛЯ")) return "Наблюдатель L";
-    if (first.includes("ЗНАМЕНАТЕЛЬ")) return "1) Знам. A(s)";
-    if (first.includes("ЧИСЛИТЕЛЬ")) return "2) Числ. B(s)";
-    if (first.includes("КОЭФФИЦИЕНТ ПЕРЕДАЧИ")) return "3) Дробь W(s)";
-    if (first.includes("ГУРВИЦА")) return "2) Гурвиц";
-    return `Шаг ${idx + 1}`;
-  };
-
-  let navHtml = `<div style="display:flex;gap:5px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--border-col);">`;
-  const allActive = state.activeReportSection === -1;
-  navHtml += `<button class="small-btn ${allActive ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=-1;renderResultCard()">📑 Все шаги (${rawSections.length})</button>`;
-  rawSections.forEach((sec, idx) => {
-    const act = state.activeReportSection === idx;
-    navHtml += `<button class="small-btn ${act ? 'active' : ''}" style="white-space:nowrap;" onclick="state.activeReportSection=${idx};renderResultCard()">${getShortTabTitle(sec, idx)}</button>`;
-  });
-  navHtml += `</div>`;
-
-  const filteredText = state.activeReportSection === -1
-    ? reportText
-    : rawSections[state.activeReportSection] || reportText;
-
-  return navHtml + _baseParseRichSectionHtml(filteredText, symbolic, isExpMode);
-};
-
-// Загружаем сохранённые матрицы при старте
-loadMatricesFromStorage();
-renderAll();
-
-// ============================================================================
-// МОДУЛЬ 2: СВЕТЛАЯ ТЕМА, ГЛАЗИК 👁 (ВОЗВРАТ МАТРИЦ A,B,C ИЗ ИСТОРИИ), СЛАУ И ФОРМУЛЫ
-// ============================================================================
-
-// Удаляем панель слотов M1/M2, если она была создана ранее
-document.getElementById("memorySlotsRow")?.remove();
-
-// --- 1. МЯГКАЯ И ГАРМОНИЧНАЯ СВЕТЛАЯ ТЕМА ---
+// --- СВЕТЛАЯ ТЕМА ---
 (function initLightThemeToggle() {
   const styleEl = document.createElement("style");
   styleEl.textContent = `
@@ -2099,9 +2062,9 @@ document.getElementById("memorySlotsRow")?.remove();
     body.light-theme .res-grid-cell,
     body.light-theme .scalar-input,
     body.light-theme .pole-input {
-      background: #F1F5F9 !important;
+      background: #F1F5F9;
       color: #0F172A !important;
-      border-color: #CBD5E1 !important;
+      border-color: #CBD5E1;
     }
     body.light-theme .matrix-cell:focus {
       background: #FFFFFF !important;
@@ -2190,162 +2153,7 @@ document.getElementById("memorySlotsRow")?.remove();
   }
 })();
 
-// --- 2. СНИМОК СОСТОЯНИЯ И ИСТОРИЯ С ГЛАЗИКОМ 👁 И ⭐ ИЗБРАННЫМ ---
-function makeCurrentInputSnapshot() {
-  return {
-    algDim: state.algDim.map(d => ({ r: d.r, c: d.c })),
-    tauN: state.tauN,
-    tauM: state.tauM,
-    tauK: state.tauK,
-    matrices: state.matrices.map(m => m.map(r => [...r]))
-  };
-}
-
-// Переопределяем saveHistory, чтобы КАЖДЫЙ расчёт сохранял введённые матрицы A, B, C
-saveHistory = function(title, text, mat = null) {
-  state.history.unshift({
-    id: Date.now(),
-    title,
-    text,
-    mat: mat ? mat.map(r => [...r]) : null,
-    inputSnap: makeCurrentInputSnapshot(),
-    pinned: false,
-    time: new Date().toLocaleTimeString()
-  });
-  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
-  if (state.history.length > 150) state.history.pop();
-  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
-  const cntEl = document.getElementById("historyCount");
-  if (cntEl) cntEl.textContent = state.history.length;
-};
-
-function cleanHistoryText(raw) {
-  return prettifyWebMath(raw || "")
-    .replace(/\s*\[(блоки|стб|стр|калман|стб_калман|стр_калман):[^\]]+\]/g, "")
-    .replace(/\[ПФ:\s*([^/]+?)\s*\/\/\/\s*([^\]]+?)\]/g, "($1) / ($2)");
-}
-
-// Извлекает первую матрицу из текста отчёта (для старых записей истории, где ещё не было inputSnap)
-function extractFirstMatrixFromText(text) {
-  if (!text) return null;
-  const lines = text.split(/\r?\n/);
-  const isMat = (s) => {
-    const t = s.trim();
-    return t.startsWith("⎡") || t.startsWith("⎢") || t.startsWith("⎣") || t.startsWith("│") ||
-      (t.startsWith("[") && t.endsWith("]") && !t.includes(";") && !t.includes("ᵀ"));
-  };
-  const rows = [];
-  let started = false;
-  for (const l of lines) {
-    if (isMat(l)) {
-      started = true;
-      const cl = l.trim().replace(/^[⎡⎢⎣│\[]+/, '').replace(/[⎤⎥⎦│\]]+$/, '').trim();
-      const nums = cl.split(/\s+/).map(parseSmartCell);
-      if (nums.length) rows.push(nums);
-    } else if (started) break;
-  }
-  return rows.length ? rows : null;
-}
-
-saveHistory = function(title, text, mat = null) {
-  const givenHdr = typeof buildGivenMatricesHeader === "function" ? buildGivenMatricesHeader(title) : "";
-  const body = text || (mat ? formatMatrixAligned(mat, state.symbolicMode) : "");
-  const fullText = (givenHdr && !body.includes("ИСХОДНЫЕ ДАННЫЕ (ДАНО):")) ? `${givenHdr}\n${body}` : body;
-
-  state.history.unshift({
-    id: Date.now(),
-    title,
-    text: fullText,
-    mat: mat ? mat.map(r => [...r]) : null,
-    pinned: false,
-    time: new Date().toLocaleTimeString()
-  });
-  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
-  if (state.history.length > 150) state.history.pop();
-  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
-  const cntEl = document.getElementById("historyCount");
-  if (cntEl) cntEl.textContent = state.history.length;
-};
-
-function restoreHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  state.resTitle = h.title;
-  state.resText = h.text;
-  state.resMatrix = h.mat;
-  state.resGrid = null;
-  state.isError = false;
-  state.activeReportSection = -1;
-  closeModal();
-  renderResultCard();
-  showToast("👁 Открыто в карточке результата (Дано + Решение)!");
-}
-
-function copyHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  navigator.clipboard?.writeText(`${prettifyWebMath(h.title)}\n\n${cleanHistoryText(h.text)}`);
-  showToast("Запись скопирована!");
-}
-
-function exportHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  state.resTitle = h.title;
-  state.resText = h.text;
-  state.resMatrix = h.mat;
-  state.resGrid = null;
-  state.isError = false;
-  renderResultCard();
-  openExportChoiceModal();
-}
-
-function togglePinHistoryItem(idx) {
-  const h = state.history[idx];
-  if (!h) return;
-  h.pinned = !h.pinned;
-  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
-  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
-  document.getElementById("btnOpenHistory").click();
-}
-
-function clearUnpinnedHistory() {
-  state.history = state.history.filter(h => h.pinned);
-  localStorage.setItem("matrix_lab_history_v1", JSON.stringify(state.history));
-  renderAll();
-  document.getElementById("btnOpenHistory").click();
-  showToast("Незакреплённая история очищена (⭐ сохранены)");
-}
-
-document.getElementById("btnOpenHistory").onclick = () => {
-  state.history.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.id - a.id));
-  const html = state.history.length ? state.history.map((h, idx) => `
-    <div style="background:#0F172A;border:1.2px solid ${h.pinned ? 'var(--amber)' : 'var(--border-col)'};border-radius:12px;padding:12px;margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
-        <span style="font-size:12.5px;color:${h.pinned ? 'var(--amber)' : 'var(--cyan)'};font-weight:800;">
-          ${h.pinned ? '⭐ ' : ''}${prettifyWebMath(h.title)}
-        </span>
-        <div style="display:flex;align-items:center;gap:5px;">
-          <span style="color:var(--text-dim);font-size:11px;margin-right:2px;">${h.time}</span>
-          <button class="small-btn" style="color:${h.pinned ? 'var(--amber)' : 'var(--text-dim)'};" onclick="togglePinHistoryItem(${idx})" title="Закрепить">${h.pinned ? '⭐' : '☆'}</button>
-          <button class="small-btn active" onclick="restoreHistoryItem(${idx})" title="Восстановить введённые матрицы A, B, C и решение">👁 В матрицы</button>
-          <button class="small-btn" onclick="copyHistoryItem(${idx})">📋</button>
-          <button class="small-btn" style="color:var(--cyan);border-color:var(--cyan);" onclick="exportHistoryItem(${idx})">📤 PDF</button>
-        </div>
-      </div>
-      <pre class="res-text" style="margin:6px 0;font-size:12px;max-height:180px;overflow-y:auto;">${cleanHistoryText(h.text)}</pre>
-      ${h.mat ? `<div class="quick-row" style="margin-top:8px;">
-        <button class="q-chip q-cyan" onclick="transferToTarget(0, state.history[${idx}].mat);closeModal()">➔ в A</button>
-        <button class="q-chip q-purple" onclick="transferToTarget(1, state.history[${idx}].mat);closeModal()">➔ в B</button>
-        <button class="q-chip q-amber" onclick="transferToTarget(2, state.history[${idx}].mat);closeModal()">➔ в C</button>
-      </div>` : ""}
-    </div>`).join("") : `<p style="color:var(--text-dim);text-align:center;">История пуста</p>`;
-  openModal("История вычислений (👁 возвращает систему A, B, C)", html,
-    `<button class="small-btn" onclick="clearUnpinnedHistory()">🗑️ Очистить (кроме ⭐)</button>
-     <button class="small-btn" onclick="closeModal()">Закрыть</button>`);
-};
-
-// --- 3. РЕШЕНИЕ СЛАУ A * X = B (ГАУСС-ЖОРДАН + КРОНЕКЕР-КАПЕЛЛИ + ФСР) ---
+// --- РЕШЕНИЕ СЛАУ A * X = B (ГАУСС-ЖОРДАН + КРОНЕКЕР-КАПЕЛЛИ + ФСР) ---
 function solveLinearSystemFullReport(matA, matB) {
   const m = matA.length, n = matA[0].length;
   const bCol = Array.from({ length: m }, (_, r) => (r < matB.length ? matB[r][0] : 0.0));
@@ -2424,11 +2232,13 @@ function runSlauSolver() {
   } catch (e) { showTextResult("Ошибка решения СЛАУ", e.message, null, null, true); }
 }
 
-// --- 4. КАЛЬКУЛЯТОР МАТРИЧНЫХ ФОРМУЛ ---
-state.formulaExpr = "2*A^2 - 3*A + 5*I";
-
+// --- КАЛЬКУЛЯТОР МАТРИЧНЫХ ФОРМУЛ ---
 function evaluateMatrixFormula(exprStr, matA, matB, matC) {
-  const n = matA.length, matI = math.identityMatrix(n);
+  const n = (/A/i.test(exprStr) && matA.length === matA[0].length) ? matA.length
+    : (/B/i.test(exprStr) && matB.length === matB[0].length) ? matB.length
+    : (/C/i.test(exprStr) && matC.length === matC[0].length) ? matC.length
+    : matA.length;
+  const matI = math.identityMatrix(n);
   const isScalar = (x) => typeof x === "number";
   const toMat = (x, r = n, c = n) => {
     if (!isScalar(x)) return x;
@@ -2459,7 +2269,7 @@ function evaluateMatrixFormula(exprStr, matA, matB, matC) {
   };
 
   let s = exprStr.replace(/[−–—]/g, "-").replace(/×/g, "*").replace(/\s+/g, "");
-  s = s.replace(/(\d)([ABCIEabcie(])/g, "$1*$2").replace(/([ABCIE)])([ABCIE(])/g, "$1*$2");
+  s = s.replace(/(\d)(?=[ABCIEabcie(])/g, "$1*").replace(/([ABCIE)])(?=[ABCIE(])/g, "$1*");
   const tokens = []; let idx = 0;
   while (idx < s.length) {
     const ch = s[idx];
@@ -2517,6 +2327,7 @@ function evaluateMatrixFormula(exprStr, matA, matB, matC) {
     throw new Error(`Ошибка в формуле возле "${tok ?? ''}"`);
   }
   const finalRes = parseExpr();
+  if (pos < tokens.length) throw new Error("Лишние символы в формуле: " + tokens.slice(pos).join(""));
   return isScalar(finalRes) ? [[finalRes]] : finalRes;
 }
 
@@ -2529,29 +2340,5 @@ function runFormulaCalc() {
   } catch (e) { showTextResult(`Формула: ${state.formulaExpr}`, e.message, null, null, true); }
 }
 
-const _prevRenderOpsPanel = renderOperationsPanel;
-renderOperationsPanel = function() {
-  _prevRenderOpsPanel();
-  if (state.mainTab === 0) {
-    const panel = document.getElementById("operationsPanel");
-    if (!panel || document.getElementById("formulaCalcBox")) return;
-    const extraDiv = document.createElement("div");
-    extraDiv.id = "formulaCalcBox";
-    extraDiv.innerHTML = `
-      <div class="sec-header" style="margin-top:12px;">Решение СЛАУ и Матричный калькулятор формул</div>
-      <div class="btn-row">
-        <button class="op-btn purple" onclick="runSlauSolver()">🧮 Решить СЛАУ A · X = B (Метод Гаусса и ФСР)</button>
-      </div>
-      <div class="scalar-bar" style="flex-wrap:wrap;gap:6px;padding:8px 10px;">
-        <span style="font-size:11.5px;color:var(--cyan);font-weight:700;width:100%;">Формула (доступны A, B, C, I, +, −, *, ^2, ^-1, ^T, inv(A)):</span>
-        <input class="scalar-input" id="formulaExprInput" style="flex:1;min-width:160px;text-align:left;padding:0 10px;font-family:monospace;font-size:14px;"
-          value="${state.formulaExpr}" oninput="state.formulaExpr=this.value"
-          onkeydown="if(event.key==='Enter')runFormulaCalc()" />
-        <button class="scalar-go" style="flex:0 0 115px;" onclick="runFormulaCalc()">Вычислить</button>
-      </div>
-    `;
-    panel.appendChild(extraDiv);
-  }
-};
-
+loadMatricesFromStorage();
 renderAll();
