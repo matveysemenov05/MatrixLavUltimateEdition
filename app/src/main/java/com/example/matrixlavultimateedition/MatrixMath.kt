@@ -468,7 +468,7 @@ class MatrixMath {
 
         // 1. Приближаем матрицу X к единичной I путём извлечения квадратных корней
         while (norm(subtract(x, id) ?: return null) > 0.35 && roots < 20) {
-            x = sqrtDB(x) ?: return null
+            x = MatrixSquareRoot.computeReal(x) ?: sqrtDB(x) ?: return null
             roots++
         }
 
@@ -492,7 +492,10 @@ class MatrixMath {
 
         val scaleFactor = 2.0 * 2.0.pow(roots)
         val result = multiplyScalar(sum, scaleFactor)
-        return if (result.all { row -> row.all { it.isFinite() } }) result else null
+        if (!result.all { row -> row.all { it.isFinite() } }) return null
+        val expCheck = matrixExponential(result) ?: return null
+        val relErr = norm(subtract(expCheck, a) ?: return null) / max(1.0, norm(a))
+        return if (relErr.isFinite() && relErr < 1e-3) result else null
     }
     /** Matrix sine/cosine by scaled Taylor series with an explicit tail test. */
     fun matrixTrig(a: Array<DoubleArray>): Pair<Array<DoubleArray>, Array<DoubleArray>> {
@@ -1243,11 +1246,14 @@ class MatrixMath {
             return Pair(canonStr, l2Str)
         }
 
+        val matrixScale = max(1.0, norm(matrix))
+
         fun nullspaceComplex(mInput: Array<Array<Complex>>): List<Array<Complex>> {
             val sh = Array(n) { r -> mInput[r].clone() }
             val pivotColumns = mutableListOf<Int>()
             var pivotRow = 0
-            val tolerance = 1e-5
+            val maxSh = sh.maxOfOrNull { row -> row.maxOfOrNull { it.abs() } ?: 0.0 } ?: 1.0
+            val tolerance = 1e-5 * max(1.0, min(matrixScale, maxSh))
 
             for (col in 0 until n) {
                 if (pivotRow >= n) break
@@ -1764,7 +1770,8 @@ class MatrixMath {
         val cleanB = trimZeroColsB(matB)
         val w = controllability(matA, cleanB)
         val r = rank(w)
-        if (r <= 0 || r >= n) return null
+        // Разрешаем строить базис S при любом r от 1 до n (включая полный ранг r == n!)
+        if (r <= 0) return null
 
         val basisCols = mutableListOf<DoubleArray>()
         for (col in 0 until w[0].size) {
@@ -1780,12 +1787,11 @@ class MatrixMath {
                 basisCols.add(candidate)
             }
         }
-        if (cleanB[0].size > 1) {
+
+        if (cleanB[0].size > 1 && r < n) {
             basisCols.sortBy { vec -> vec.indexOfFirst { abs(it) > 1e-6 }.let { if (it == -1) Int.MAX_VALUE else it } }
         }
 
-        // Если в последней строке выбранных столбцов есть отрицательные числа (Конспект 1, стр. 1) —
-        // берем e_2 = [0,1,0]^T, иначе берем с конца e_n = [0,0,1]^T (Конспект 1 стр. 3-4 и Конспект 2 стр. 3)
         val unitOrder = if (basisCols.any { it[n - 1] < -1e-9 }) {
             (1 until n).toList() + listOf(0)
         } else {
@@ -1955,7 +1961,8 @@ class MatrixMath {
                     DoubleArray(m) { 1.0 },
                     DoubleArray(m) { j -> (j + 1).toDouble() },
                     DoubleArray(m) { j -> if (j % 2 == 0) 1.0 else -1.0 },
-                    DoubleArray(m) { j -> 1.0 / (j + 1).toDouble() }
+                    DoubleArray(m) { j -> 1.0 / (j + 1).toDouble() },
+                    DoubleArray(m) { j -> (j + 2).toDouble() * (if (j % 2 == 0) 1.0 else -1.0) }
                 )
                 for (gVec in candidatesG) {
                     val testB = Array(n) { r ->
@@ -1966,9 +1973,13 @@ class MatrixMath {
                     if (rank(controllability(matA, testB)) == rTotal) {
                         chosenG = gVec
                         bEff = testB
+                        foundSingle = true
                         break
                     }
                 }
+            }
+            require(foundSingle) {
+                "Многовходовая система (m = $m) не сводится к одному входу (матрица A не циклическая). Используйте LQR-оптимизацию."
             }
 
             val kSingle = ackermann(matA, bEff, desiredPoles)
@@ -2298,7 +2309,7 @@ class MatrixMath {
             var woMat: Array<DoubleArray>? = null
 
             // =========================================================
-            // 1) ПРОВЕРКА УПРАВЛЯЕМОСТИ
+            // 1) ПРОВЕРКА УПРАВЛЯЕМОСТИ И РАЗЛОЖЕНИЕ НА ПОДПРОСТРАНСТВА (ВСЕГДА!)
             // =========================================================
             if (hasB) {
                 appendLine("1) ПРОВЕРКА УПРАВЛЯЕМОСТИ:")
@@ -2307,64 +2318,64 @@ class MatrixMath {
                 rankC = rank(wc)
                 isFullCtrl = (rankC == n)
 
-                appendLine("Матрица управляемости U = [B, AB, A²B, ...]:")
+                appendLine("Матрица управляемости C(A,B) = U = [B, AB, A²B, ...]:")
                 appendLine(formatMatrixAligned(wc))
                 if (wc.size == wc[0].size) {
                     val detU = determinant(wc) ?: 0.0
                     appendLine("det(U) = ${toCleanFractionString(detU)}")
                 }
                 appendLine("rank(U) = $rankC (при n = $n)")
+                appendLine("• Управляемое подпространство: dim = $rankC")
+                appendLine("• Неуправляемое подпространство: dim = ${n - rankC}")
 
-                if (isFullCtrl) {
-                    isStabilizable = true
-                    appendLine("➔ Вывод: система полностью управляема. Регулятор построить можно.")
-                } else {
-                    appendLine("➔ Вывод: система не является полностью управляемой.")
-                    appendLine("• Управляемое подпространство: dim = $rankC")
-                    appendLine("• Неуправляемое подпространство: dim = ${n - rankC}")
+                val kd = kalmanNotebookDecomposition(matA, cleanB)
+                if (kd != null) {
+                    val (r, sMat, sInv) = kd
+                    val aTilde = multiply(multiply(sInv, matA)!!, sMat)!!
+                    val bTilde = multiply(sInv, cleanB)!!
+                    val aCtrl = Array(r) { i -> DoubleArray(r) { j -> aTilde[i][j] } }
 
-                    val kd = kalmanNotebookDecomposition(matA, cleanB)
-                    if (kd != null) {
-                        val (r, sMat, sInv) = kd
-                        val aTilde = multiply(multiply(sInv, matA)!!, sMat)!!
-                        val bTilde = multiply(sInv, cleanB)!!
-                        val aCtrl = Array(r) { i -> DoubleArray(r) { j -> aTilde[i][j] } }
+                    appendLine()
+                    appendLine("Разложение Калмана по управляемости (базис S):")
+                    appendLine("Матрица преобразования S [стб: упр=$r, неупр=${n - r}]:")
+                    appendLine(formatMatrixAligned(sMat))
+                    appendLine("Обратная матрица S⁻¹:")
+                    appendLine(formatMatrixAligned(sInv))
+                    appendLine("Новая матрица Ã = S⁻¹ A S [блоки: упр=$r, неупр=${n - r}]:")
+                    appendLine(formatMatrixAligned(aTilde))
+                    appendLine("Новая матрица B̃ = S⁻¹ B [стр: упр=$r, неупр=${n - r}]:")
+                    appendLine(formatMatrixAligned(bTilde))
+                    appendLine("Управляемая часть Ac (${r}×$r):")
+                    appendLine(formatMatrixAligned(aCtrl))
+
+                    if (r < n) {
                         val aUn = Array(n - r) { i -> DoubleArray(n - r) { j -> aTilde[r + i][r + j] } }
                         val unEigs = eigenvalues(aUn)
                         isStabilizable = unEigs.all { it.re < -1e-7 }
-
-                        if (!hasC) {
-                            appendLine()
-                            appendLine("Построим разложение Калмана на управляемое и неуправляемое подпространства:")
-                            appendLine("Матрица преобразования S [стб: упр=$r, неупр=${n - r}]:")
-                            appendLine(formatMatrixAligned(sMat))
-                            appendLine("Обратная матрица S⁻¹:")
-                            appendLine(formatMatrixAligned(sInv))
-                            appendLine("Новая матрица Ã = S⁻¹ A S [блоки: упр=$r, неупр=${n - r}]:")
-                            appendLine(formatMatrixAligned(aTilde))
-                            appendLine("Новая матрица B̃ = S⁻¹ B [стр: упр=$r, неупр=${n - r}]:")
-                            appendLine(formatMatrixAligned(bTilde))
-                            appendLine("Управляемая часть Ac (${r}×$r):")
-                            appendLine(formatMatrixAligned(aCtrl))
-                            appendLine("Неуправляемая часть Au (${n - r}×${n - r}):")
-                            appendLine(formatMatrixAligned(aUn))
-                            appendLine("Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.joinToString(", ")} }")
-
-                            if (isStabilizable) {
-                                appendLine("➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).")
-                                appendLine("➔ Вывод: система СТАБИЛИЗИРУЕМА. Регулятор построить можно.")
-                            } else {
-                                appendLine("➔ Есть собственные числа неуправляемой части с Re(λ) ≥ 0 (неуправляемая часть неустойчива).")
-                                appendLine("➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.")
-                            }
+                        appendLine("Неуправляемая часть Au (${n - r}×${n - r}):")
+                        appendLine(formatMatrixAligned(aUn))
+                        appendLine("Собственные числа неуправляемой части Au: λ(Au) = { ${unEigs.joinToString(", ")} }")
+                        if (isStabilizable) {
+                            appendLine("➔ Собственные числа неуправляемой части Re(λ) < 0 (неуправляемая часть устойчива).")
+                            appendLine("➔ Вывод: система не полностью управляема, но СТАБИЛИЗИРУЕМА. Регулятор построить можно.")
+                        } else {
+                            appendLine("➔ Есть собственные числа неуправляемой части с Re(λ) ≥ 0 (неуправляемая часть неустойчива).")
+                            appendLine("➔ Вывод: система НЕ СТАБИЛИЗИРУЕМА. Регулятор построить нельзя.")
                         }
+                    } else {
+                        isStabilizable = true
+                        appendLine("Неуправляемая часть Au: отсутствует (dim = 0)")
+                        appendLine("➔ Вывод: система ПОЛНОСТЬЮ управляема и стабилизируема. Регулятор построить можно.")
                     }
+                } else if (isFullCtrl) {
+                    isStabilizable = true
+                    appendLine("➔ Вывод: система ПОЛНОСТЬЮ управляема. Регулятор построить можно.")
                 }
                 appendLine("════════════════════════════════")
             }
 
             // =========================================================
-            // 2) ПРОВЕРКА НАБЛЮДАЕМОСТИ
+            // 2) ПРОВЕРКА НАБЛЮДАЕМОСТИ И РАЗЛОЖЕНИЕ НА ПОДПРОСТРАНСТВА (ВСЕГДА!)
             // =========================================================
             if (hasC) {
                 appendLine(if (hasB) "2) ПРОВЕРКА НАБЛЮДАЕМОСТИ:" else "1) ПРОВЕРКА НАБЛЮДАЕМОСТИ:")
@@ -2375,60 +2386,63 @@ class MatrixMath {
 
                 appendLine("Матрица наблюдаемости O = [C; CA; CA²; ...]:")
                 appendLine(formatMatrixAligned(wo))
+                if (wo.size == wo[0].size) {
+                    val detO = determinant(wo) ?: 0.0
+                    appendLine("det(O) = ${toCleanFractionString(detO)}")
+                }
                 appendLine("rank(O) = $rankO (при n = $n)")
+                appendLine("• Наблюдаемое подпространство: dim = $rankO")
+                appendLine("• Ненаблюдаемое подпространство: dim = ${n - rankO}")
 
-                if (isFullObs) {
-                    isDetectable = true
-                    appendLine("➔ Вывод: система полностью наблюдаема. Наблюдатель построить можно.")
-                } else {
-                    appendLine("➔ Вывод: система не является полностью наблюдаемой.")
-                    appendLine("• Наблюдаемое подпространство: dim = $rankO")
-                    appendLine("• Ненаблюдаемое подпространство: dim = ${n - rankO}")
+                val aT = transpose(matA); val cT = transpose(cleanC)
+                val kdObs = kalmanNotebookDecomposition(aT, cT)
+                if (kdObs != null) {
+                    val (rObs, tMatDual, tInvDual) = kdObs
+                    val aTildeDual = multiply(multiply(tInvDual, aT)!!, tMatDual)!!
+                    val tObs = transpose(tInvDual); val tObsInv = transpose(tMatDual)
+                    val aTildeObs = multiply(multiply(tObsInv, matA)!!, tObs)!!
+                    val cTildeObs = multiply(cleanC, tObs)!!
 
-                    val aT = transpose(matA); val cT = transpose(cleanC)
-                    val kdObs = kalmanNotebookDecomposition(aT, cT)
-                    if (kdObs != null) {
-                        val (rObs, tMatDual, tInvDual) = kdObs
-                        val aTildeDual = multiply(multiply(tInvDual, aT)!!, tMatDual)!!
+                    appendLine()
+                    appendLine("Разложение Калмана по наблюдаемости (базис T_o):")
+                    appendLine("Матрица перехода T_o:")
+                    appendLine(formatMatrixAligned(tObs))
+                    appendLine("Обратная матрица T_o⁻¹:")
+                    appendLine(formatMatrixAligned(tObsInv))
+                    appendLine("Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=$rObs, неупр=${n - rObs}]:")
+                    appendLine(formatMatrixAligned(aTildeObs))
+                    appendLine("Матрица C̃_o = C T_o [стб: упр=$rObs, неупр=${n - rObs}]:")
+                    appendLine(formatMatrixAligned(cTildeObs))
+
+                    if (rObs < n) {
                         val aUnObs = Array(n - rObs) { i -> DoubleArray(n - rObs) { j -> aTildeDual[rObs + i][rObs + j] } }
                         val unObsEigs = eigenvalues(aUnObs)
                         isDetectable = unObsEigs.all { it.re < -1e-7 }
-
-                        if (!hasB) {
-                            val tObs = transpose(tInvDual); val tObsInv = transpose(tMatDual)
-                            val aTildeObs = multiply(multiply(tObsInv, matA)!!, tObs)!!
-                            val cTildeObs = multiply(cleanC, tObs)!!
-
-                            appendLine()
-                            appendLine("Построим разложение на наблюдаемое и ненаблюдаемое подпространства:")
-                            appendLine("Матрица перехода T_o:")
-                            appendLine(formatMatrixAligned(tObs))
-                            appendLine("Обратная матрица T_o⁻¹:")
-                            appendLine(formatMatrixAligned(tObsInv))
-                            appendLine("Матрица Ã_o = T_o⁻¹ A T_o [блоки: упр=$rObs, неупр=${n - rObs}]:")
-                            appendLine(formatMatrixAligned(aTildeObs))
-                            appendLine("Матрица C̃_o = C T_o:")
-                            appendLine(formatMatrixAligned(cTildeObs))
-                            appendLine("Собственные числа ненаблюдаемой части: λ = { ${unObsEigs.joinToString(", ")} }")
-
-                            if (isDetectable) {
-                                appendLine("➔ Ненаблюдаемая часть устойчива (Re(λ) < 0).")
-                                appendLine("➔ Вывод: система ДЕТЕКТИРУЕМА. Наблюдатель построить можно.")
-                            } else {
-                                appendLine("➔ Ненаблюдаемая часть неустойчива (есть Re(λ) ≥ 0).")
-                                appendLine("➔ Вывод: система НЕ ДЕТЕКТИРУЕМА. Наблюдатель построить нельзя.")
-                            }
+                        appendLine("Собственные числа ненаблюдаемой части: λ = { ${unObsEigs.joinToString(", ")} }")
+                        if (isDetectable) {
+                            appendLine("➔ Ненаблюдаемая часть устойчива (Re(λ) < 0).")
+                            appendLine("➔ Вывод: система не полностью наблюдаема, но ДЕТЕКТИРУЕМА. Наблюдатель построить можно.")
+                        } else {
+                            appendLine("➔ Ненаблюдаемая часть неустойчива (есть Re(λ) ≥ 0).")
+                            appendLine("➔ Вывод: система НЕ ДЕТЕКТИРУЕМА. Наблюдатель построить нельзя.")
                         }
+                    } else {
+                        isDetectable = true
+                        appendLine("Ненаблюдаемая часть: отсутствует (dim = 0)")
+                        appendLine("➔ Вывод: система ПОЛНОСТЬЮ наблюдаема и детектируема. Наблюдатель построить можно.")
                     }
+                } else if (isFullObs) {
+                    isDetectable = true
+                    appendLine("➔ Вывод: система ПОЛНОСТЬЮ наблюдаема. Наблюдатель построить можно.")
                 }
                 appendLine("════════════════════════════════")
             }
 
             // =========================================================
-            // 3) ПОЛНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T1, T2, T3, T4] (Конспект 3)
+            // 3) ПОЛНОЕ 4-БЛОЧНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T1, T2, T3, T4] (ВСЕГДА!)
             // =========================================================
-            if (hasB && hasC && (!isFullCtrl || !isFullObs) && wcMat != null && woMat != null) {
-                appendLine("3) ПОСТРОЕНИЕ РАЗЛОЖЕНИЯ КАЛМАНА T = [T₁ T₂ T₃ T₄]:")
+            if (hasB && hasC && wcMat != null && woMat != null) {
+                appendLine("3) ПОЛНОЕ 4-БЛОЧНОЕ РАЗЛОЖЕНИЕ КАЛМАНА T = [T₁ T₂ T₃ T₄]:")
                 val imU = columnSpaceBasis(wcMat)
                 val kerO = realNullspaceBasis(woMat)
                 val t2 = intersectSubspaces(imU, kerO, n)
@@ -2450,8 +2464,8 @@ class MatrixMath {
                     "[" + v.joinToString("; ") { x -> toCleanFractionString(x) } + "]ᵀ"
                 }
 
-                appendLine("1. Образ Im U(A,B) = span{ ${fmt(imU)} }")
-                appendLine("2. Ядро Ker O(A,C) = span{ ${fmt(kerO)} }")
+                appendLine("1. Образ управляемости Im U(A,B) = span{ ${fmt(imU)} }")
+                appendLine("2. Ядро наблюдаемости Ker O(A,C) = span{ ${fmt(kerO)} }")
                 appendLine("3. Пересечение Im U ∩ Ker O (блок T₂ — упр., ненабл.): ${fmt(t2)}")
                 appendLine("4. Блок T₁ (упр., набл.): ${fmt(t1)}")
                 appendLine("5. Блок T₄ (неупр., ненабл.): ${fmt(t4)}")
@@ -2468,6 +2482,7 @@ class MatrixMath {
                         val n1 = t1.size; val n2 = t2.size; val n3 = t3.size; val n4 = t4.size
 
                         appendLine()
+                        appendLine("Размерности подпространств Калмана: dim(T₁)=$n1, dim(T₂)=$n2, dim(T₃)=$n3, dim(T₄)=$n4")
                         appendLine("Матрица замены T = [T₁ T₂ T₃ T₄] [стб_калман: T1=$n1, T2=$n2, T3=$n3, T4=$n4]:")
                         appendLine(formatMatrixAligned(tFull))
                         appendLine("Обратная матрица T⁻¹:")
@@ -2513,22 +2528,24 @@ class MatrixMath {
                 appendLine("════════════════════════════════")
             }
 
-            // =========================================================
-            // 4) ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ И СИНТЕЗ
-            // =========================================================
             if (hasB && hasC) {
                 appendLine("ИТОГОВЫЙ ВЫВОД ПО БЛОК-СХЕМЕ:")
-                if (!isFullCtrl) {
-                    appendLine(if (isStabilizable) "✅ Неуправляемая часть устойчива ➔ Система СТАБИЛИЗИРУЕМА (регулятор построить можно)."
-                    else "❌ Неуправляемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ СТАБИЛИЗИРУЕМА (регулятор построить нельзя).")
-                } else {
-                    appendLine("✅ Система полностью управляема (регулятор построить можно).")
-                }
-                if (!isFullObs) {
-                    appendLine(if (isDetectable) "✅ Ненаблюдаемая часть устойчива ➔ Система ДЕТЕКТИРУЕМА (наблюдатель построить можно)."
-                    else "❌ Ненаблюдаемая часть неустойчива (Re λ ≥ 0) ➔ Система НЕ ДЕТЕКТИРУЕМА (наблюдатель построить нельзя).")
-                } else {
-                    appendLine("✅ Система полностью наблюдаема (наблюдатель построить можно).")
+                when {
+                    isFullCtrl && isFullObs ->
+                        appendLine("✅ Система полностью управляема и наблюдаема.\nРегулятор и наблюдатель построить можно.")
+                    isFullCtrl && !isFullObs && isDetectable ->
+                        appendLine("✅ Система полностью управляема и детектируема.\nРегулятор и наблюдатель построить можно.")
+                    isFullCtrl && !isFullObs && !isDetectable ->
+                        appendLine("⚠️ Система полностью управляема, но не детектируема.\nРегулятор построить можно. Наблюдатель построить нельзя.")
+                    !isFullCtrl && isFullObs && isStabilizable ->
+                        appendLine("✅ Система полностью наблюдаема и стабилизируема.\nНаблюдатель и регулятор построить можно.")
+                    !isFullCtrl && isFullObs && !isStabilizable ->
+                        appendLine("⚠️ Система полностью наблюдаема, но не стабилизируема.\nНаблюдатель построить можно. Регулятор построить нельзя.")
+                    else -> {
+                        val rTxt = if (isStabilizable) "✅ Система СТАБИЛИЗИРУЕМА (регулятор построить можно)." else "❌ Система НЕ стабилизируема (регулятор построить нельзя)."
+                        val oTxt = if (isDetectable) "✅ Система ДЕТЕКТИРУЕМА (наблюдатель построить можно)." else "❌ Система НЕ детектируема (наблюдатель построить нельзя)."
+                        appendLine("Система не является полностью управляемой и наблюдаемой:\n$rTxt\n$oTxt")
+                    }
                 }
                 appendLine("════════════════════════════════")
             }
@@ -2536,17 +2553,29 @@ class MatrixMath {
             if (hasB && isStabilizable) {
                 try {
                     val flags = getControllableModeFlags(matA, cleanB, eigs)
+                    val hasUnstableCtrl = eigs.indices.any { i -> flags[i] && eigs[i].re >= -1e-5 }
                     val usedReals = eigs.map { it.re }.toMutableList()
                     var nextNeg = -1.0
 
                     val targetPoles = List(n) { idx ->
                         val orig = eigs[idx]
-                        if (!flags[idx] || orig.re < -1e-5) orig
-                        else if (abs(orig.im) < 1e-5 && orig.re > 1e-5 && usedReals.none { abs(it + orig.re) < 1e-4 }) {
-                            usedReals.add(-orig.re)
-                            Complex(-orig.re, 0.0)
+                        if (!flags[idx]) {
+                            orig
+                        } else if (!hasUnstableCtrl) {
+                            while (usedReals.any { abs(it - nextNeg) < 1e-4 }) nextNeg -= 1.0
+                            usedReals.add(nextNeg)
+                            val p = Complex(nextNeg, 0.0)
+                            nextNeg -= 1.0
+                            p
+                        } else if (orig.re < -1e-5) {
+                            orig
+                        } else if (abs(orig.im) < 1e-5 && orig.re > 1e-5 && abs(orig.re - kotlin.math.round(orig.re)) < 1e-4 && usedReals.none { abs(it + orig.re) < 1e-4 }) {
+                            val mir = -kotlin.math.round(orig.re)
+                            usedReals.add(mir)
+                            Complex(mir, 0.0)
                         } else {
                             while (usedReals.any { abs(it - nextNeg) < 1e-4 } && abs(orig.im) < 1e-5) nextNeg -= 1.0
+                            usedReals.add(nextNeg)
                             val p = Complex(nextNeg, 0.0)
                             nextNeg -= 1.0
                             p
@@ -2559,7 +2588,7 @@ class MatrixMath {
 
                     appendLine("ПОСТРОЕНИЕ РЕГУЛЯТОРА:")
                     appendLine("Целевые полюса управляемых мод: ${targetPoles.filterIndexed { i, _ -> flags[i] }.joinToString(", ")}")
-                    appendLine("Спектр замкнутой системы: { ${clSpec.joinToString(", ")} }")
+                    appendLine("Спектр замкнутой системы (A − BK): { ${clSpec.joinToString(", ")} }")
                     appendLine()
                     appendLine("Матрица K (для u = −Kx):")
                     appendLine(formatMatrixAligned(kAuto))
@@ -2578,22 +2607,455 @@ class MatrixMath {
                 try {
                     val cRow = Array(1) { DoubleArray(n) { col -> cleanC[0][col] } }
                     val flags = getObservableModeFlags(matA, cRow, eigs)
-                    var step = 2
+                    val existingReals = eigs.map { it.re }.toMutableList()
+                    var obsNeg = -2.0
+
                     val targetObsPoles = List(n) { idx ->
-                        if (!flags[idx] || eigs[idx].re < -1e-5) eigs[idx] else Complex(-(step++).toDouble(), 0.0)
+                        if (!flags[idx]) {
+                            eigs[idx]
+                        } else {
+                            while (existingReals.any { abs(it - obsNeg) < 1e-4 }) obsNeg -= 1.0
+                            existingReals.add(obsNeg)
+                            val p = Complex(obsNeg, 0.0)
+                            obsNeg -= 1.0
+                            p
+                        }
                     }
                     val lAuto = luenbergerObserver(matA, cRow, targetObsPoles)
                     val obsClSpec = eigenvalues(subtract(matA, multiply(lAuto, cRow)!!)!!)
 
-                    appendLine("ПОСТРОЕНИЕ НАБЛЮДАТЕЛЯ:")
+                    appendLine("ПОСТРОЕНИЕ НАБЛЮДАТЕЛЯ ЛЮЕНБЕРГЕРА:")
                     appendLine("Целевые полюса наблюдаемых мод: ${targetObsPoles.filterIndexed { i, _ -> flags[i] }.joinToString(", ")}")
-                    appendLine("Спектр ошибки наблюдения: { ${obsClSpec.joinToString(", ")} }")
+                    appendLine("Спектр ошибки наблюдения (A − LC): { ${obsClSpec.joinToString(", ")} }")
                     appendLine()
-                    appendLine("Матрица L (${n}×1):")
+                    appendLine("Матрица наблюдателя L (${n}×1):")
                     appendLine(formatMatrixAligned(lAuto))
                 } catch (e: Exception) {
                     appendLine("⚠️ Ошибка расчёта наблюдателя L: ${e.message}")
                 }
+            }
+        }
+    }
+    // =========================================================================
+    // ПРЕОБРАЗОВАНИЕ «ВХОД-ВЫХОД» W(s) <===> «ПРОСТРАНСТВО СОСТОЯНИЙ» (A, B, C, D)
+    // =========================================================================
+
+    data class TransferFunctionToSSResult(
+        val n: Int,
+        val aCtrl: Array<DoubleArray>,
+        val bCtrl: Array<DoubleArray>,
+        val cCtrl: Array<DoubleArray>,
+        val dScalar: Double,
+        val report: String
+    )
+
+    data class StateSpaceToTFResult(
+        val numCoeffs: DoubleArray, // [b_{n-1}, ..., b_1, b_0]
+        val denCoeffs: DoubleArray, // [1.0, a_{n-1}, ..., a_0]
+        val report: String
+    )
+
+    /** Форматирует полином по массиву коэффициентов от старшей степени к младшей: [c_d, c_{d-1}, ..., c_0] */
+    fun formatPolynomialS(coeffsHighToLow: DoubleArray, varName: String = "s"): String {
+        val d = coeffsHighToLow.size - 1
+        val terms = mutableListOf<String>()
+        for (i in coeffsHighToLow.indices) {
+            val p = d - i
+            val v = coeffsHighToLow[i]
+            if (abs(v) < 1e-8) continue
+            val absStr = toCleanFractionString(abs(v))
+            val sign = when {
+                v < 0 && terms.isNotEmpty() -> " − "
+                v < 0 -> "−"
+                terms.isNotEmpty() -> " + "
+                else -> ""
+            }
+            val powerStr = when (p) {
+                0 -> ""
+                1 -> varName
+                else -> "$varName${subOrSupPower(p)}"
+            }
+            val coefStr = if (p > 0 && absStr == "1") "" else if (p > 0 && absStr.contains("/")) "($absStr)" else absStr
+            terms.add("$sign$coefStr$powerStr")
+        }
+        return if (terms.isEmpty()) "0" else terms.joinToString("")
+    }
+
+    private fun subOrSupPower(p: Int): String {
+        val map = charArrayOf('⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹')
+        return p.toString().map { if (it in '0'..'9') map[it - '0'] else it }.joinToString("")
+    }
+
+    /** Форматирует дифференциальное уравнение по коэффициентам знаменателя A(s) и числителя B(s) */
+    private fun formatDiffEquation(denHighToLow: DoubleArray, numHighToLow: DoubleArray): String {
+        fun sideStr(coeffs: DoubleArray, fn: String): String {
+            val d = coeffs.size - 1
+            val terms = mutableListOf<String>()
+            for (i in coeffs.indices) {
+                val order = d - i
+                val v = coeffs[i]
+                if (abs(v) < 1e-8) continue
+                val absStr = toCleanFractionString(abs(v))
+                val sign = when {
+                    v < 0 && terms.isNotEmpty() -> " − "
+                    v < 0 -> "−"
+                    terms.isNotEmpty() -> " + "
+                    else -> ""
+                }
+                val deriv = when (order) {
+                    0 -> fn
+                    1 -> "$fn'"
+                    2 -> "$fn''"
+                    3 -> "$fn'''"
+                    else -> "$fn^($order)"
+                }
+                val coef = if (absStr == "1") "" else "$absStr·"
+                terms.add("$sign$coef$deriv")
+            }
+            return if (terms.isEmpty()) "0" else terms.joinToString("")
+        }
+        return "${sideStr(denHighToLow, "y")} = ${sideStr(numHighToLow, "u")}"
+    }
+
+    /**
+     * 1) Из описания «Вход–Выход» W(s) = B(s) / A(s) в Пространство Состояний (A, B, C, D).
+     * numHighToLow: коэффициенты числителя от старшей степени к младшей [b_m, ..., b_1, b_0]
+     * denHighToLow: коэффициенты знаменателя от старшей степени к младшей [a_n, ..., a_1, a_0]
+     */
+    fun transferFunctionToStateSpace(
+        numHighToLowInput: DoubleArray,
+        denHighToLowInput: DoubleArray
+    ): TransferFunctionToSSResult {
+        // Убираем ведущие нули
+        val firstDenIdx = denHighToLowInput.indexOfFirst { abs(it) > 1e-10 }
+        require(firstDenIdx != -1) { "Знаменатель A(s) не может быть равен нулю!" }
+        val rawDen = denHighToLowInput.drop(firstDenIdx).toDoubleArray()
+        val n = rawDen.size - 1
+        require(n in 1..7) { "Степень знаменателя n должна быть от 1 до 7 (сейчас n = $n)" }
+
+        val firstNumIdx = numHighToLowInput.indexOfFirst { abs(it) > 1e-10 }
+        val rawNum = if (firstNumIdx == -1) doubleArrayOf(0.0) else numHighToLowInput.drop(firstNumIdx).toDoubleArray()
+        val m = rawNum.size - 1
+        require(m <= n) {
+            "Степень числителя (m = $m) не должна превышать степень знаменателя (n = $n) для физически реализуемой системы!"
+        }
+
+        // Нормируем на старший коэффициент знаменателя a_n
+        val an = rawDen[0]
+        val monicDen = DoubleArray(n + 1) { i -> rawDen[i] / an } // [1, a_{n-1}, ..., a_0]
+        // Выравниваем числитель до длины n + 1: [b_n, b_{n-1}, ..., b_0]
+        val paddedNum = DoubleArray(n + 1) { i ->
+            val offset = (n + 1) - rawNum.size
+            if (i >= offset) rawNum[i - offset] / an else 0.0
+        }
+
+        // aAsc[k] = a_k при s^k (k = 0..n-1)
+        val aAsc = DoubleArray(n) { k -> monicDen[n - k] }
+        val bAsc = DoubleArray(n + 1) { k -> paddedNum[n - k] }
+
+        // Выделение прямой связи D = b_n (если m == n)
+        val dVal = bAsc[n]
+        val betaAsc = DoubleArray(n) { k -> bAsc[k] - aAsc[k] * dVal }
+
+        // 1. Управляемая каноническая форма (Фробениуса)
+        val aCtrl = Array(n) { i ->
+            DoubleArray(n) { j ->
+                if (i < n - 1) {
+                    if (j == i + 1) 1.0 else 0.0
+                } else {
+                    if (abs(aAsc[j]) < 1e-12) 0.0 else -aAsc[j]
+                }
+            }
+        }
+        val bCtrl = Array(n) { i -> doubleArrayOf(if (i == n - 1) 1.0 else 0.0) }
+        val cCtrl = arrayOf(DoubleArray(n) { j -> if (abs(betaAsc[j]) < 1e-12) 0.0 else betaAsc[j] })
+
+        // 2. Наблюдаемая каноническая форма (двойственная)
+        val aObs = transpose(aCtrl)
+        val bObs = transpose(cCtrl)
+        val cObs = transpose(bCtrl)
+
+        val poles = eigenvalues(aCtrl)
+
+        val report = buildString {
+            appendLine("ПРЕОБРАЗОВАНИЕ «ВХОД–ВЫХОД» ➔ «ПРОСТРАНСТВО СОСТОЯНИЙ»:")
+            appendLine("Исходная передаточная функция (коэффициент передачи):")
+            appendLine("W(s) = [ПФ: ${formatPolynomialS(rawNum)} /// ${formatPolynomialS(rawDen)}]")
+            if (abs(an - 1.0) > 1e-7) {
+                appendLine("После нормировки на старший коэффициент a_$n = ${toCleanFractionString(an)}:")
+                appendLine("W(s) = [ПФ: ${formatPolynomialS(paddedNum)} /// ${formatPolynomialS(monicDen)}]")
+            }
+            appendLine()
+            appendLine("Дифференциальное уравнение «вход–выход»:")
+            appendLine(formatDiffEquation(monicDen, paddedNum))
+            appendLine("Порядок системы: n = $n, степень числителя: m = $m")
+            if (abs(dVal) > 1e-8) {
+                appendLine("Выделена прямая связь (при m = n): D = ${toCleanFractionString(dVal)}")
+            }
+            appendLine("════════════════════════════════")
+            appendLine("1) УПРАВЛЯЕМАЯ КАНОНИЧЕСКАЯ ФОРМА (ФРОБЕНИУСА):")
+            appendLine(if (abs(dVal) > 1e-8) "⎧ x' = A_c x + B_c u\n⎩ y  = C_c x + D u" else "⎧ x' = A_c x + B_c u\n⎩ y  = C_c x")
+            appendLine("Матрица состояния A_c (${n}×$n) [блоки: упр=$n, неупр=0]:")
+            appendLine(formatMatrixAligned(aCtrl))
+            appendLine("Матрица входа B_c (${n}×1) [стр: упр=$n, неупр=0]:")
+            appendLine(formatMatrixAligned(bCtrl))
+            appendLine("Матрица выхода C_c (1×$n):")
+            appendLine(formatMatrixAligned(cCtrl))
+            if (abs(dVal) > 1e-8) {
+                appendLine("Коэффициент прямой передачи D = [ ${toCleanFractionString(dVal)} ]")
+            }
+            appendLine("════════════════════════════════")
+            appendLine("2) НАБЛЮДАЕМАЯ КАНОНИЧЕСКАЯ ФОРМА (ДВОЙСТВЕННАЯ):")
+            appendLine("Матрица состояния A_o = A_cᵀ (${n}×$n):")
+            appendLine(formatMatrixAligned(aObs))
+            appendLine("Матрица входа B_o = C_cᵀ (${n}×1):")
+            appendLine(formatMatrixAligned(bObs))
+            appendLine("Матрица выхода C_o = B_cᵀ (1×$n):")
+            appendLine(formatMatrixAligned(cObs))
+            appendLine("════════════════════════════════")
+            appendLine("ПОЛЮСА ПЕРЕДАТОЧНОЙ ФУНКЦИИ (корни A(s) = 0):")
+            appendLine("λ = { ${poles.mapIndexed { i, c -> "λ${i + 1} = $c" }.joinToString(", ")} }")
+            val isStable = poles.all { it.re < -1e-7 }
+            appendLine(if (isStable) "✅ Все полюса в левой полуплоскости (Re λ < 0) ➔ система УСТОЙЧИВА."
+            else "⚠️ Есть полюса с Re λ ≥ 0 ➔ система НЕУСТОЙЧИВА.")
+        }
+
+        return TransferFunctionToSSResult(n, aCtrl, bCtrl, cCtrl, dVal, report)
+    }
+
+    /** Деление полиномов с остатком (от старшей степени к младшей) для алгоритма Евклида */
+    private fun polyDivMod(uIn: DoubleArray, vIn: DoubleArray): Pair<DoubleArray, DoubleArray> {
+        fun trimLead(p: DoubleArray): DoubleArray {
+            val idx = p.indexOfFirst { abs(it) > 1e-7 }
+            return if (idx == -1) doubleArrayOf(0.0) else p.drop(idx).toDoubleArray()
+        }
+        val u = trimLead(uIn)
+        val v = trimLead(vIn)
+        if (v.size == 1 && abs(v[0]) < 1e-9) return Pair(doubleArrayOf(0.0), u)
+        if (u.size < v.size || (u.size == 1 && abs(u[0]) < 1e-7)) return Pair(doubleArrayOf(0.0), u)
+
+        val q = DoubleArray(u.size - v.size + 1)
+        val rem = u.clone()
+        val vLead = v[0]
+        for (i in q.indices) {
+            val coef = rem[i] / vLead
+            q[i] = coef
+            for (j in v.indices) {
+                rem[i + j] -= coef * v[j]
+            }
+        }
+        return Pair(trimLead(q), trimLead(rem))
+    }
+
+    /** Находит нормированный НОД двух полиномов (для проверки сократимости полюсов и нулей W(s)) */
+    private fun polyGcd(aIn: DoubleArray, bIn: DoubleArray): DoubleArray {
+        fun trimLead(p: DoubleArray): DoubleArray {
+            val idx = p.indexOfFirst { abs(it) > 1e-6 }
+            return if (idx == -1) doubleArrayOf(0.0) else p.drop(idx).toDoubleArray()
+        }
+        var a = trimLead(aIn)
+        var b = trimLead(bIn)
+        val scaleA = a.maxOfOrNull { abs(it) } ?: 1.0
+        val scaleB = b.maxOfOrNull { abs(it) } ?: 1.0
+        if (b.size == 1 && abs(b[0]) < 1e-6 * scaleB) return doubleArrayOf(1.0)
+
+        for (step in 0 until 15) {
+            val (_, r) = polyDivMod(a, b)
+            val maxR = r.maxOfOrNull { abs(it) } ?: 0.0
+            val maxA = a.maxOfOrNull { abs(it) } ?: 1.0
+            if (maxR <= 1e-5 * max(1.0, maxA)) {
+                val lead = b[0]
+                return DoubleArray(b.size) { i -> b[i] / lead }
+            }
+            a = b
+            b = r
+        }
+        return doubleArrayOf(1.0)
+    }
+
+    /**
+     * 2) Из Пространства Состояний (A, B, C) в описание «Вход–Выход» W(s) = C (sI - A)^(-1) B
+     * методом резольвенты Фаддеева — Леверье.
+     */
+    fun stateSpaceToTransferFunction(
+        matA: Array<DoubleArray>,
+        matB: Array<DoubleArray>,
+        matC: Array<DoubleArray>
+    ): StateSpaceToTFResult {
+        val n = matA.size
+        require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной n×n" }
+        val cleanB = trimZeroColsB(matB)
+        val cleanC = trimZeroRowsC(matC)
+        require(cleanB.size == n && cleanC[0].size == n) { "Размеры B и C должны быть согласованы с A (${n}×$n)" }
+
+        // Алгоритм Фаддеева — Леверье:
+        // (sI - A)^(-1) = (F_1 s^(n-1) + F_2 s^(n-2) + ... + F_n) / (s^n + p_1 s^(n-1) + ... + p_n)
+        val fMatrices = mutableListOf<Array<DoubleArray>>()
+        val pCoeffs = DoubleArray(n) // [p_1, p_2, ..., p_n]
+        var fCur = identityMatrix(n)
+
+        for (k in 1..n) {
+            fMatrices.add(fCur)
+            val af = multiply(matA, fCur)!!
+            val tr = (0 until n).sumOf { af[it][it] }
+            val pk = -tr / k.toDouble()
+            pCoeffs[k - 1] = if (abs(pk) < 1e-9) 0.0 else if (abs(pk - kotlin.math.round(pk)) < 1e-6) kotlin.math.round(pk) else pk
+            if (k < n) {
+                fCur = Array(n) { r ->
+                    DoubleArray(n) { c ->
+                        val v = af[r][c] + if (r == c) pCoeffs[k - 1] else 0.0
+                        if (abs(v) < 1e-9) 0.0 else if (abs(v - kotlin.math.round(v)) < 1e-6) kotlin.math.round(v) else v
+                    }
+                }
+            }
+        }
+
+        val denCoeffs = DoubleArray(n + 1) { i -> if (i == 0) 1.0 else pCoeffs[i - 1] }
+
+        // Для основного канала (первый вход u_1, первый выход y_1): b_col = B[:, 0], c_row = C[0, :]
+        val bCol = Array(n) { r -> doubleArrayOf(cleanB[r][0]) }
+        val cRow = arrayOf(DoubleArray(n) { c -> cleanC[0][c] })
+
+        val numCoeffs = DoubleArray(n) { idx ->
+            val cFb = multiply(multiply(cRow, fMatrices[idx])!!, bCol)!![0][0]
+            if (abs(cFb) < 1e-8) 0.0 else if (abs(cFb - kotlin.math.round(cFb)) < 1e-6) kotlin.math.round(cFb) else cFb
+        }
+
+        // Проверяем, сократима ли дробь B(s) / A(s) (когда rank(U) < n или rank(O) < n)
+        val gcdPoly = if (numCoeffs.any { abs(it) > 1e-8 }) polyGcd(denCoeffs, numCoeffs) else doubleArrayOf(1.0)
+        val hasCancellation = gcdPoly.size > 1
+        val (redDen, remDen) = if (hasCancellation) polyDivMod(denCoeffs, gcdPoly) else Pair(denCoeffs, doubleArrayOf(0.0))
+        val (redNum, remNum) = if (hasCancellation) polyDivMod(numCoeffs, gcdPoly) else Pair(numCoeffs, doubleArrayOf(0.0))
+        val validCancellation = hasCancellation &&
+                (remDen.maxOfOrNull { abs(it) } ?: 0.0) < 1e-4 &&
+                (remNum.maxOfOrNull { abs(it) } ?: 0.0) < 1e-4
+
+        val report = buildString {
+            appendLine("ПРЕОБРАЗОВАНИЕ «ПРОСТРАНСТВО СОСТОЯНИЙ» ➔ «ВХОД–ВЫХОД»:")
+            appendLine("Формула коэффициента передачи: W(s) = C·(sI − A)⁻¹·B = B(s) / A(s)")
+            appendLine("════════════════════════════════")
+            appendLine("1) ЗНАМЕНАТЕЛЬ A(s) = det(sI − A) (по методу Фаддеева — Леверье):")
+            appendLine("Коэффициенты: [ ${denCoeffs.joinToString(", ") { toCleanFractionString(it) }} ]")
+            appendLine("A(s) = ${formatPolynomialS(denCoeffs)}")
+            appendLine("════════════════════════════════")
+            appendLine("2) ЧИСЛИТЕЛЬ B(s) = C·adj(sI − A)·B:")
+            appendLine("Присоединённая матрица adj(sI − A) = F₁·s${subOrSupPower(n - 1)} + ... + F_$n, где β_{n-k} = C·F_k·B:")
+            for (k in 1..n) {
+                val pwr = n - k
+                val sTag = if (pwr == 0) "1" else if (pwr == 1) "s" else "s${subOrSupPower(pwr)}"
+                appendLine("• При $sTag: C·F_$k·B = ${toCleanFractionString(numCoeffs[k - 1])}")
+            }
+            appendLine("Коэффициенты числителя: [ ${numCoeffs.joinToString(", ") { toCleanFractionString(it) }} ]")
+            appendLine("B(s) = ${formatPolynomialS(numCoeffs)}")
+            appendLine("════════════════════════════════")
+            appendLine("3) ИТОГОВЫЙ КОЭФФИЦИЕНТ ПЕРЕДАЧИ W(s):")
+            appendLine("W(s) = [ПФ: ${formatPolynomialS(numCoeffs)} /// ${formatPolynomialS(denCoeffs)}]")
+
+            if (validCancellation) {
+                appendLine()
+                appendLine("⚠️ Обнаружен общий множитель числителя и знаменателя (неуправляемые/ненаблюдаемые моды):")
+                appendLine("НОД(B(s), A(s)) = ${formatPolynomialS(gcdPoly)}")
+                appendLine("Сокращённая передаточная функция (минимальная реализация):")
+                appendLine("W_мин(s) = [ПФ: ${formatPolynomialS(redNum)} /// ${formatPolynomialS(redDen)}]")
+            }
+
+            // Если входов m > 1 или выходов k > 1 — выводим всю матрицу передаточных функций W_ij(s)
+            if (cleanB[0].size > 1 || cleanC.size > 1) {
+                appendLine()
+                appendLine("Матрица передаточных функций W_{i,j}(s) для всех каналов (${cleanC.size}×${cleanB[0].size}):")
+                for (r in cleanC.indices) {
+                    val cr = arrayOf(cleanC[r])
+                    for (c in 0 until cleanB[0].size) {
+                        val bc = Array(n) { i -> doubleArrayOf(cleanB[i][c]) }
+                        val mij = DoubleArray(n) { idx ->
+                            val v = multiply(multiply(cr, fMatrices[idx])!!, bc)!![0][0]
+                            if (abs(v) < 1e-8) 0.0 else v
+                        }
+                        appendLine("• W_{${r + 1},${c + 1}}(s) = (${formatPolynomialS(mij)}) / (${formatPolynomialS(denCoeffs)})")
+                    }
+                }
+            }
+
+            appendLine("════════════════════════════════")
+            appendLine("4) ДИФФЕРЕНЦИАЛЬНОЕ УРАВНЕНИЕ «ВХОД–ВЫХОД»:")
+            appendLine(formatDiffEquation(if (validCancellation) redDen else denCoeffs, if (validCancellation) redNum else numCoeffs))
+        }
+
+        return StateSpaceToTFResult(numCoeffs, denCoeffs, report)
+    }
+    /**
+     * Полный анализ устойчивости непрерывной системы по собственным числам Re(λ_i) < 0
+     * и алгебраическому критерию Гурвица (матрица Гурвица и главные миноры Δ_1..Δ_n).
+     */
+    fun hurwitzAndSpectralStability(matA: Array<DoubleArray>): String {
+        val n = matA.size
+        require(n > 0 && matA.all { it.size == n }) { "Матрица A должна быть квадратной" }
+
+        val eigs = eigenvalues(matA)
+        val maxReal = eigs.maxOf { it.re }
+
+        // Коэффициенты характеристического полинома p(λ) = λ^n + a_1 λ^(n-1) + ... + a_n (где a_0 = 1)
+        var bMat = identityMatrix(n)
+        val aCoeffs = DoubleArray(n + 1)
+        aCoeffs[0] = 1.0
+        for (k in 1..n) {
+            val ab = multiply(matA, bMat)!!
+            val tr = (0 until n).sumOf { ab[it][it] }
+            val ck = -tr / k.toDouble()
+            aCoeffs[k] = if (abs(ck) < 1e-9) 0.0 else if (abs(ck - kotlin.math.round(ck)) < 1e-6) kotlin.math.round(ck) else ck
+            if (k < n) {
+                bMat = Array(n) { r -> DoubleArray(n) { c -> ab[r][c] + if (r == c) aCoeffs[k] else 0.0 } }
+            }
+        }
+
+        // Составляем матрицу Гурвица H размера n×n: H[i][j] = a_{2*j - i + 1}
+        val hurwitzMat = Array(n) { i ->
+            DoubleArray(n) { j ->
+                val idx = 2 * j - i + 1
+                if (idx in 0..n) aCoeffs[idx] else 0.0
+            }
+        }
+
+        // Вычисляем определители Гурвица Δ_1, Δ_2, ..., Δ_n
+        val deltas = DoubleArray(n) { k ->
+            val sz = k + 1
+            val sub = Array(sz) { r -> DoubleArray(sz) { c -> hurwitzMat[r][c] } }
+            val d = determinant(sub) ?: 0.0
+            if (abs(d) < 1e-9) 0.0 else if (abs(d - kotlin.math.round(d)) < 1e-6) kotlin.math.round(d) else d
+        }
+        val allDeltasPositive = deltas.all { it > 1e-8 }
+
+        return buildString {
+            appendLine("АНАЛИЗ УСТОЙЧИВОСТИ НЕПРЕРЫВНОЙ СИСТЕМЫ:")
+            when {
+                maxReal < -1e-8 -> appendLine("✅ СИСТЕМА АСИМПТОТИЧЕСКИ УСТОЙЧИВА (все Re λᵢ < 0)")
+                maxReal > 1e-8 -> appendLine("❌ СИСТЕМА НЕУСТОЙЧИВА (есть Re λᵢ > 0)")
+                else -> appendLine("⚠️ СИСТЕМА НА ГРАНИЦЕ УСТОЙЧИВОСТИ (есть корни с Re λᵢ = 0)")
+            }
+            appendLine()
+            appendLine("1) Спектральный критерий (собственные числа A):")
+            eigs.forEachIndexed { idx, v -> appendLine("• λ${subDigit(idx + 1)} = $v") }
+            appendLine("════════════════════════════════")
+            appendLine("2) АЛГЕБРАИЧЕСКИЙ КРИТЕРИЙ ГУРВИЦА:")
+            appendLine("Характеристический многочлен:")
+            appendLine("p(s) = ${formatPolynomialS(aCoeffs)}")
+            appendLine()
+            appendLine("Матрица Гурвица H (${n}×$n):")
+            appendLine(formatMatrixAligned(hurwitzMat))
+            appendLine("Главные диагональные миноры (определители Гурвица):")
+            deltas.forEachIndexed { idx, d ->
+                val signSym = when {
+                    d > 1e-8 -> "> 0 (✅)"
+                    d < -1e-8 -> "< 0 (❌)"
+                    else -> "= 0 (⚠️)"
+                }
+                appendLine("• Δ${subDigit(idx + 1)} = ${toCleanFractionString(d)}  $signSym")
+            }
+            appendLine()
+            if (allDeltasPositive) {
+                appendLine("✅ Все определители Гурвица Δ₁..Δₙ > 0 ➔ по критерию Гурвица система АСИМПТОТИЧЕСКИ УСТОЙЧИВА.")
+            } else {
+                appendLine("❌ Условие Δₖ > 0 нарушено ➔ по критерию Гурвица система НЕ является асимптотически устойчивой.")
             }
         }
     }
